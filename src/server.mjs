@@ -14,6 +14,9 @@ import { buildRecord, recordHash, putRecord, getRecord, rootHashOf, walletStatus
 import { chat, llmReady, MODEL } from './llm.mjs';
 import { addToIndex, getIndex } from './index-store.mjs';
 import { mintMemory, mintingReady, contractAddress, mintStatusOf, galleryOf } from './chain.mjs';
+import { seal, open } from './seal.mjs';
+import * as market from './market-store.mjs';
+import { randomUUID } from 'node:crypto';
 import { sendEmailCode, verifyEmailCode, privyReady } from './privy.mjs';
 import {
   issueToken,
@@ -469,6 +472,141 @@ app.get('/api/gallery/:sessionId', async (req, res) => {
     console.error('[gallery] failed:', err.message);
     res.status(502).json({ error: 'could not load your gallery — please try again.' });
   }
+});
+
+// ── Sealed Market (Track-2 MVP): sell encrypted memories, buy to decrypt.
+// SEAL encrypts a memory's content (AES-256-GCM) and stores the ciphertext as a
+// fresh, content-addressed record on 0G; BROWSE exposes only a teaser + price; BUY
+// records a purchase grant; UNLOCK decrypts SERVER-SIDE for the seller or a granted
+// buyer and returns plaintext — the symmetric key NEVER leaves the server.
+// Honest MVP: the encryption + purchase-gated unlock are real; on-chain payment
+// settlement and NFT ownership transfer are mocked and labeled roadmap.
+const capStr = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+
+// SEAL & LIST: encrypt one of YOUR stored memories and publish a sealed listing.
+app.post('/api/market/seal', rateLimit, async (req, res) => {
+  const owner = sessionAddress(req);
+  if (!owner) return res.status(401).json({ error: 'sign in to seal & list a memory' });
+  const { sessionId, turnId } = req.body || {};
+  if (typeof sessionId !== 'string' || typeof turnId !== 'string') {
+    return res.status(400).json({ error: 'sessionId and turnId required' });
+  }
+  if (!gateSession(req, res, sessionId)) return; // you can only seal your OWN memory
+
+  const title = capStr(req.body?.title, 120);
+  const teaser = capStr(req.body?.teaser, 280); // an intentional public preview; the BODY is what's sealed
+  const priceLabel = capStr(req.body?.priceLabel, 24); // display-only
+  if (!title) return res.status(400).json({ error: 'a title is required' });
+
+  // Resolve the source memory's rootHash + ts — live session first, durable index
+  // fallback (same resolution as /api/mint).
+  let sourceRootHash;
+  const turn = sessions.get(sessionId)?.turns.find(
+    (t) => t.turnId === turnId && t.receipt?.status === 'stored'
+  );
+  if (turn) {
+    sourceRootHash = turn.receipt.rootHash;
+  } else {
+    const entry = getIndex(sessionId).find((e) => e.turnId === turnId);
+    if (entry) sourceRootHash = entry.rootHash;
+  }
+  if (!sourceRootHash) {
+    return res.status(404).json({ error: 'memory not found or not yet stored on 0G' });
+  }
+
+  try {
+    // Pull the plaintext memory from 0G, seal it, store the ciphertext as a NEW 0G
+    // record (the original memory/rootHash/NFT are read-only and untouched).
+    const { record } = await getRecord(sourceRootHash);
+    const plaintext = JSON.stringify({
+      prompt: record.prompt,
+      response: record.response,
+      model: record.model,
+      ts: record.ts,
+    });
+    const { envelope, keyB64 } = seal(plaintext, record.model || MODEL);
+    const { rootHash: cipherRootHash, txHash: sealTxHash } = await persistWithRetry(envelope);
+
+    const listingId = randomUUID();
+    market.addListing({
+      listingId,
+      seller: owner,
+      sourceRootHash,
+      cipherRootHash,
+      title,
+      teaser,
+      priceLabel,
+      model: record.model || MODEL,
+      sealedAt: envelope.sealedAt,
+      sealTxHash,
+      createdAt: Date.now(),
+    });
+    market.setKey(listingId, keyB64); // server-custodied key — never leaves the server
+    countSpend(req); // a real 0G upload just succeeded
+    res.json(market.toPublic(market.getListing(listingId)));
+  } catch (err) {
+    console.error('[market] seal failed:', err.message);
+    res.status(502).json({ error: 'could not seal & list — please try again.' });
+  }
+});
+
+// BROWSE: public bazaar. Only the whitelisted public projection — no key, no body.
+app.get('/api/market/listings', (_req, res) => {
+  res.json({ listings: market.listPublic() });
+});
+
+// BUY: record a purchase grant for the cookie-verified buyer. Payment is MOCKED
+// (no value moves; priceLabel is display-only) and labeled roadmap; the
+// authorization grant is real, server-side, and idempotent (replay-safe).
+app.post('/api/market/buy', rateLimit, (req, res) => {
+  const buyer = sessionAddress(req);
+  if (!buyer) return res.status(401).json({ error: 'sign in to buy' });
+  const { listingId } = req.body || {};
+  if (typeof listingId !== 'string') return res.status(400).json({ error: 'listingId required' });
+  if (!market.getListing(listingId)) return res.status(404).json({ error: 'listing not found' });
+  market.grantBuyer(listingId, buyer);
+  res.json({ purchased: true });
+});
+
+// UNLOCK — THE GATE. Identity is the cookie's wallet ONLY (never a body/query
+// address), so there's no IDOR: listingId selects WHAT, the cookie selects WHO, and
+// a grant for one listing can't unlock another. Only the seller or a recorded
+// purchaser passes; only then is the key read and the plaintext returned. The key
+// itself NEVER leaves the server.
+app.post('/api/market/unlock', rateLimit, async (req, res) => {
+  const caller = sessionAddress(req);
+  if (!caller) return res.status(401).json({ error: 'sign in to unlock' });
+  const { listingId } = req.body || {};
+  if (typeof listingId !== 'string') return res.status(400).json({ error: 'listingId required' });
+  const listing = market.getListing(listingId);
+  if (!listing) return res.status(404).json({ error: 'listing not found' });
+  const allowed = caller === listing.seller || market.hasGrant(listingId, caller);
+  if (!allowed) return res.status(403).json({ error: 'purchase required to unlock' });
+  try {
+    const keyB64 = market.getKey(listingId);
+    const { record: envelope } = await getRecord(listing.cipherRootHash);
+    const plaintext = open(envelope, keyB64); // throws on wrong key / tampered bytes
+    const body = JSON.parse(plaintext);
+    res.set('Cache-Control', 'no-store'); // decrypted plaintext must never be cached
+    res.json({
+      prompt: body.prompt,
+      response: body.response,
+      model: body.model,
+      ts: body.ts,
+      sourceRootHash: listing.sourceRootHash,
+      cipherRootHash: listing.cipherRootHash,
+    });
+  } catch (err) {
+    console.error('[market] unlock failed:', listingId, err.message);
+    res.status(502).json({ error: 'unlock failed' });
+  }
+});
+
+// MINE: drive the UI's owner / already-purchased states for the signed-in caller.
+app.get('/api/market/mine', (req, res) => {
+  const me = sessionAddress(req);
+  if (!me) return res.json({ listed: [], purchased: [] });
+  res.json({ listed: market.listingsBySeller(me), purchased: market.grantsOfBuyer(me) });
 });
 
 // ── Identity: email-OTP login via Privy → embedded wallet address = identity.

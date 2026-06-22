@@ -22,6 +22,20 @@ const galleryGrid = document.getElementById('gallery-grid');
 const gallerySub = document.getElementById('gallery-sub');
 const galleryState = document.getElementById('gallery-state');
 const galleryBack = document.getElementById('gallery-back');
+const marketBtn = document.getElementById('market-btn');
+const market = document.getElementById('market');
+const marketGrid = document.getElementById('market-grid');
+const marketState = document.getElementById('market-state');
+const marketSub = document.getElementById('market-sub');
+const marketBack = document.getElementById('market-back');
+const sealBtn = document.getElementById('seal-btn');
+const sealOverlay = document.getElementById('seal-overlay');
+const sealClose = document.getElementById('seal-close');
+const sealTitle = document.getElementById('seal-title');
+const sealTeaser = document.getElementById('seal-teaser');
+const sealPrice = document.getElementById('seal-price');
+const sealSubmit = document.getElementById('seal-submit');
+const sealMsg = document.getElementById('seal-msg');
 const pillOg = document.getElementById('pill-og');
 const pillLlm = document.getElementById('pill-llm');
 const restored = document.getElementById('restored');
@@ -371,6 +385,11 @@ function openPopover(badge) {
   if (shareBtn) {
     shareBtn.hidden = !(minted && minted.anchoredAt);
     shareBtn.dataset.turnId = turnId || '';
+  }
+  // Seal & list this memory in the market (available once it's stored on 0G).
+  if (sealBtn) {
+    sealBtn.hidden = status !== 'stored';
+    sealBtn.dataset.turnId = turnId || '';
   }
 
   const r = badge.getBoundingClientRect();
@@ -766,6 +785,7 @@ proveBtn.addEventListener('click', async () => {
 // address), content re-fetched from 0G. Its own full-section view, not a popover.
 function showChatView() {
   gallery.hidden = true;
+  market.hidden = true;
   thread.hidden = false;
   composer.hidden = false;
 }
@@ -802,6 +822,7 @@ async function openGallery() {
   thread.hidden = true;
   composer.hidden = true;
   restored.hidden = true;
+  market.hidden = true;
   gallery.hidden = false;
   galleryGrid.replaceChildren();
   galleryState.hidden = false;
@@ -830,6 +851,257 @@ async function openGallery() {
 
 galleryBtn.addEventListener('click', openGallery);
 galleryBack.addEventListener('click', showChatView);
+
+// ── Sealed Market: browse encrypted listings; buy to decrypt ─────────────
+// Public browse (anyone, even anonymous). Buy/unlock require a signed-in wallet.
+// The decryption key NEVER reaches the client — /api/market/unlock returns the
+// already-decrypted plaintext only to the seller or a recorded purchaser.
+let purchasedSet = new Set();
+
+async function openMarket() {
+  popover.hidden = true;
+  thread.hidden = true;
+  composer.hidden = true;
+  restored.hidden = true;
+  gallery.hidden = true;
+  market.hidden = false;
+  marketGrid.replaceChildren();
+  marketState.hidden = false;
+  marketState.textContent = 'loading sealed listings from 0G…';
+  marketSub.textContent = 'encrypted memories, sealed on 0G — buy to decrypt';
+  purchasedSet = new Set();
+  try {
+    if (identity) {
+      try {
+        const mineRes = await fetch('/api/market/mine');
+        if (mineRes.ok) {
+          const mine = await mineRes.json();
+          purchasedSet = new Set(mine.purchased || []);
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+    const res = await fetch('/api/market/listings');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'could not load the market');
+    const items = data.listings || [];
+    if (!items.length) {
+      marketState.hidden = false;
+      marketState.textContent = 'No sealed listings yet — seal one of your memories from its receipt to list it here.';
+      marketSub.textContent = '0 listings · the bazaar is open';
+      return;
+    }
+    marketState.hidden = true;
+    marketSub.textContent = `${items.length} sealed listing${items.length === 1 ? '' : 's'} · buy to decrypt`;
+    for (const it of items) marketGrid.appendChild(renderListingCard(it));
+  } catch (err) {
+    marketState.hidden = false;
+    marketState.textContent = `✕ ${err.message}`;
+    marketSub.textContent = '';
+  }
+}
+
+function renderListingCard(it) {
+  const me = identity?.address ? identity.address.toLowerCase() : null;
+  const mine = me && it.seller === me;
+  const bought = purchasedSet.has(it.listingId);
+
+  const card = el('div', 'listing-card');
+  const head = el('div', 'listing-head');
+  head.appendChild(el('div', 'listing-title', it.title || 'Untitled'));
+  if (it.priceLabel) head.appendChild(el('span', 'price-chip', it.priceLabel));
+  card.appendChild(head);
+  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}${it.model ? ' · ' + it.model : ''}`));
+  if (it.teaser) card.appendChild(el('div', 'listing-teaser', `“${it.teaser}”`));
+
+  const body = el('div', 'sealed-body', '🔒 sealed — the full memory is encrypted on 0G');
+  card.appendChild(body);
+
+  const actions = el('div', 'listing-actions');
+  const btn = el('button', 'listing-btn');
+  const note = el('div', 'listing-note');
+
+  const reveal = async () => {
+    btn.disabled = true;
+    btn.textContent = 'unlocking…';
+    try {
+      const r = await fetch('/api/market/unlock', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ listingId: it.listingId }),
+      });
+      if (r.status === 401) {
+        openLogin('Sign in to unlock sealed memories.');
+        btn.disabled = false;
+        btn.textContent = 'Reveal';
+        return;
+      }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'unlock failed');
+      if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
+      body.textContent = d.response || '(empty)';
+      body.classList.add('revealed');
+      actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked — decrypted from 0G'));
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Reveal';
+      note.textContent = `✕ ${e.message}`;
+      note.className = 'listing-note bad';
+    }
+  };
+
+  const doBuy = async () => {
+    if (!identity) {
+      openLogin('Sign in to buy and unlock sealed memories.');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'purchasing…';
+    try {
+      const r = await fetch('/api/market/buy', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ listingId: it.listingId }),
+      });
+      if (r.status === 401) {
+        openLogin('Sign in to buy sealed memories.');
+        btn.disabled = false;
+        btn.textContent = 'Buy to unlock';
+        return;
+      }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'purchase failed');
+      purchasedSet.add(it.listingId);
+      note.replaceChildren();
+      btn.disabled = false;
+      btn.textContent = 'Reveal';
+      btn.onclick = reveal;
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Buy to unlock';
+      note.textContent = `✕ ${e.message}`;
+      note.className = 'listing-note bad';
+    }
+  };
+
+  if (mine || bought) {
+    btn.textContent = mine ? 'Reveal (yours)' : 'Reveal';
+    btn.onclick = reveal;
+  } else {
+    btn.textContent = 'Buy to unlock';
+    btn.onclick = doBuy;
+    note.textContent = 'simulated purchase — unlocks real sealed content';
+  }
+  actions.appendChild(btn);
+  if (note.textContent) actions.appendChild(note);
+  card.appendChild(actions);
+
+  // Verify the ciphertext is intact on 0G (sealed records verify via contentAddressOk).
+  const ver = el('div', 'listing-verify');
+  ver.appendChild(el('span', null, 'ciphertext'));
+  const vlink = el('a', 'listing-root', `${it.cipherRootHash.slice(0, 10)}…${it.cipherRootHash.slice(-6)}`);
+  vlink.href = '#';
+  vlink.title = 'Verify the sealed ciphertext is intact on 0G';
+  const vres = el('span', 'listing-vres', '');
+  vlink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    vres.textContent = ' checking…';
+    vres.className = 'listing-vres';
+    try {
+      const r = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rootHash: it.cipherRootHash }),
+      });
+      const d = await r.json();
+      if (d.contentAddressOk) {
+        vres.textContent = ' ✓ sealed ciphertext intact on 0G';
+        vres.className = 'listing-vres ok';
+      } else {
+        vres.textContent = ' ✕ could not verify';
+        vres.className = 'listing-vres bad';
+      }
+    } catch (e2) {
+      vres.textContent = ` ✕ ${e2.message}`;
+      vres.className = 'listing-vres bad';
+    }
+  });
+  ver.appendChild(vlink);
+  ver.appendChild(vres);
+  card.appendChild(ver);
+
+  return card;
+}
+
+marketBtn.addEventListener('click', openMarket);
+marketBack.addEventListener('click', showChatView);
+
+// ── Seal & list (from a memory's receipt popover) ────────────────────────
+let sealTurnId = null;
+function openSeal(turnId) {
+  if (!identity) {
+    popover.hidden = true;
+    openLogin('Sign in to seal & list this memory.');
+    return;
+  }
+  sealTurnId = turnId;
+  popover.hidden = true;
+  sealTitle.value = '';
+  sealTeaser.value = '';
+  sealPrice.value = '';
+  sealMsg.textContent = '';
+  sealMsg.className = 'modal-msg';
+  sealSubmit.disabled = false;
+  sealOverlay.hidden = false;
+  sealTitle.focus();
+}
+function closeSeal() {
+  sealOverlay.hidden = true;
+}
+sealClose.addEventListener('click', closeSeal);
+sealOverlay.addEventListener('click', (e) => {
+  if (e.target === sealOverlay) closeSeal();
+});
+sealSubmit.addEventListener('click', async () => {
+  const title = sealTitle.value.trim();
+  if (!title) {
+    sealMsg.textContent = 'A title is required.';
+    sealMsg.className = 'modal-msg bad';
+    return;
+  }
+  sealSubmit.disabled = true;
+  sealMsg.textContent = 'sealing & uploading ciphertext to 0G… (~15s)';
+  sealMsg.className = 'modal-msg info';
+  try {
+    const r = await fetch('/api/market/seal', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        turnId: sealTurnId,
+        title,
+        teaser: sealTeaser.value.trim(),
+        priceLabel: sealPrice.value.trim(),
+      }),
+    });
+    if (r.status === 401) {
+      closeSeal();
+      openLogin('Sign in to seal & list this memory.');
+      return;
+    }
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'could not seal');
+    sealMsg.textContent = '✓ sealed & listed in the market';
+    sealMsg.className = 'modal-msg ok';
+    setTimeout(closeSeal, 950);
+  } catch (e) {
+    sealMsg.textContent = `✕ ${e.message}`;
+    sealMsg.className = 'modal-msg bad';
+    sealSubmit.disabled = false;
+  }
+});
+sealBtn.addEventListener('click', () => openSeal(sealBtn.dataset.turnId));
 
 // Recover rootHashes the browser never captured by merging the server index.
 async function mergeServerRoots() {
