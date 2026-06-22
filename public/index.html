@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keep — an AI that remembers you, and can prove it</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="mark">◆</span>
+          <div>
+            <div class="name">Keep</div>
+            <div class="tag">an AI that remembers you — and can prove it</div>
+          </div>
+        </div>
+        <div class="pills" id="pills">
+          <span class="pill" id="pill-mem" title="Things you've told Keep this session">
+            remembering <strong id="mem-count">0</strong><span id="mem-saving"></span>
+          </span>
+          <span class="pill muted" id="pill-og" title="0G storage wallet">0G…</span>
+          <span class="pill muted" id="pill-llm" title="Chat model">model…</span>
+          <button
+            class="pill action"
+            id="prove"
+            hidden
+            title="Wipe the server's in-memory copy, then reload — memory can only come back from 0G"
+          >
+            prove it ⟲
+          </button>
+          <button class="pill ident" id="identity" title="Your portable Keep identity">sign in</button>
+        </div>
+      </header>
+
+      <main class="thread" id="thread">
+        <!-- messages injected here -->
+      </main>
+
+      <div class="restored" id="restored" hidden>
+        ↻ <span id="restored-text"></span>
+      </div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <input
+          id="input"
+          type="text"
+          placeholder="Tell Keep something to remember…"
+          aria-label="Message"
+        />
+        <button type="submit" id="send">Send</button>
+      </form>
+    </div>
+
+    <!-- Receipt popover (one, repositioned per badge click) -->
+    <div class="popover" id="popover" hidden>
+      <div class="pop-row">
+        <span class="pop-label">status</span>
+        <span class="pop-val" id="pop-status"></span>
+      </div>
+      <div class="pop-row">
+        <span class="pop-label">model</span><span class="pop-val" id="pop-model"></span>
+      </div>
+      <div class="pop-row">
+        <span class="pop-label">time</span><span class="pop-val" id="pop-time"></span>
+      </div>
+      <div class="pop-row">
+        <span class="pop-label">rootHash</span>
+        <a class="pop-val mono" id="pop-root" target="_blank" rel="noopener"></a>
+      </div>
+      <div class="pop-actions">
+        <button id="verify-btn">Verify on 0G</button>
+        <button id="mint-btn">Mint as NFT ⬦</button>
+      </div>
+      <div class="pop-result">
+        <span class="verify-result" id="verify-result"></span>
+        <span class="mint-result" id="mint-result"></span>
+      </div>
+    </div>
+
+    <!-- Login modal -->
+    <div class="modal-overlay" id="login-overlay" hidden>
+      <div class="modal" id="login-modal">
+        <button class="modal-close" id="login-close" aria-label="Close">×</button>
+        <div class="modal-title">Sign in to own your memories</div>
+        <div class="modal-sub">
+          Your memories follow you across devices — and you own them on-chain. No wallet to install;
+          a secure wallet is created for you.
+        </div>
+
+        <div id="login-step-email">
+          <input id="login-email" type="email" placeholder="you@email.com" aria-label="Email" />
+          <button id="login-send" class="modal-primary">Email me a code</button>
+        </div>
+
+        <div id="login-step-code" hidden>
+          <div class="modal-sub" id="login-code-hint"></div>
+          <input id="login-code" type="text" inputmode="numeric" placeholder="newest 6-digit code" aria-label="Code" />
+          <button id="login-verify" class="modal-primary">Verify & sign in</button>
+          <button id="login-resend" class="modal-link">resend a fresh code</button>
+          <button id="login-back" class="modal-link">use a different email</button>
+        </div>
+
+        <div class="modal-msg" id="login-msg"></div>
+      </div>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

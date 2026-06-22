@@ -1,0 +1,26 @@
+{
+  "name": "keep",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keep — a self-sovereign AI whose every output is remembered and verifiable on 0G. (0G Cup / The Zero Cup entry)",
+  "scripts": {
+    "wallet": "node scripts/gen-wallet.mjs",
+    "spike": "node scripts/spike.mjs",
+    "privy-spike": "node scripts/privy-spike.mjs",
+    "deploy:contract": "node scripts/deploy-contract.mjs",
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.10",
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@privy-io/node": "^0.22.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "express": "^5.2.1",
+    "solc": "^0.8.26",
+    "viem": "^2.53.1"
+  }
+}

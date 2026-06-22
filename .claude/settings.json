@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill)",
+      "Bash(PORT=3000 node src/server.mjs)",
+      "WebSearch",
+      "WebFetch(domain:docs.0g.ai)",
+      "WebFetch(domain:0g.ai)",
+      "WebFetch(domain:lagrange.dev)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:compute.0g.ai)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(gh api *)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/0gfoundation/0g-compute-ts-sdk/main/src.ts/sdk/inference/broker/verifier.ts\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/0gfoundation/0g-compute-ts-sdk/main/src.ts/sdk/inference/broker/response.ts\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/0gfoundation/0g-compute-ts-sdk/main/src.ts/sdk/inference/broker/base.ts\")",
+      "Bash(grep -nA25 -E 'static \\(async \\)?\\(verifySignature|fetchSignatureByChatID\\)')",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/0gfoundation/0g-compute-ts-sdk/main/src.ts/sdk/inference/broker/model.ts\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/0gfoundation/0g-compute-ts-sdk/main/src.ts/sdk/inference/broker/read-only-model.ts\")",
+      "Bash(grep -niB1 -A12 -E 'VerifiabilityEnum|enum Verifiability|TeeML|OpML|ZkML')",
+      "mcp__claude_ai_FireCrawl__firecrawl_search",
+      "WebFetch(domain:docs.privy.io)",
+      "Bash(npm install *)",
+      "Bash(node scripts/privy-spike.mjs)",
+      "Bash(node scripts/deploy-contract.mjs)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);for\\(const [sid,arr] of Object.entries\\(j\\)\\){console.log\\(sid,'->',arr.length,'memr; turnId',arr[0]?.turnId?.slice\\(0,16\\),'root',arr[0]?.rootHash?.slice\\(0,14\\)\\)}}\\)\")",
+      "Bash(pkill -f 'src/server.mjs')",
+      "Read(//tmp/**)",
+      "Bash(curl -s localhost:3000/api/health)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);console.log\\('loginReady:',j.loginReady,'| mintingReady:',j.mintingReady,'| ogReady:',j.ogReady\\)}\\)\")",
+      "Bash(curl -s -X POST localhost:3000/api/auth/email/send -H 'content-type: application/json' -d '{\"email\":\"keep-spike-test@example.com\"}')",
+      "Bash(curl -s -X POST localhost:3000/api/auth/email/send -H 'content-type: application/json' -d '{\"email\":\"nope\"}')",
+      "Bash(curl -s -X POST localhost:3000/api/auth/email/verify -H 'content-type: application/json' -d '{\"email\":\"a@b.com\"}')",
+      "Bash(grep -rhoE \"this\\\\.\\(post|get|put|delete\\)\\\\\\([^\\)]{0,60}\" resources/client-auth.js)",
+      "Bash(curl -s -o /dev/null -w \"health HTTP %{http_code}\\\\n\" localhost:3000/api/health)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code} time %{time_total}s\\\\n\" -X POST localhost:3000/api/auth/email/send -H 'content-type: application/json' -d '{\"email\":\"keep-spike-test@example.com\"}')"
+    ]
+  }
+}
