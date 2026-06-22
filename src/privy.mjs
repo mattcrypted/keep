@@ -7,6 +7,10 @@
 import 'dotenv/config';
 import { PrivyClient } from '@privy-io/node';
 import { createViemAccount } from '@privy-io/node/viem';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 const APP_ID = process.env.PRIVY_APP_ID;
 const APP_SECRET = process.env.PRIVY_APP_SECRET;
@@ -14,6 +18,60 @@ const BASE = 'https://api.privy.io/v1';
 
 export function privyReady() {
   return !!(APP_ID && APP_SECRET);
+}
+
+// ── App-signing (Option B) ────────────────────────────────────────────────
+// With PRIVY_AUTHORIZATION_KEY set (a P-256 PKCS8 private key, base64, no PEM), the
+// app can sign transactions FROM a user's wallet — needed so a buyer's OWN wallet pays
+// the seller. New wallets get this key (via a key quorum) as an ADDITIONAL SIGNER, so
+// the USER still owns the wallet and the app is only a co-signer. Gated: with the key
+// unset, everything below is inert and wallet creation behaves exactly as before.
+const AUTH_KEY = process.env.PRIVY_AUTHORIZATION_KEY || '';
+export function appSigningReady() {
+  return !!(AUTH_KEY && privyReady());
+}
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = process.env.KEEP_DATA_DIR || join(__dirname, '..', 'data');
+const QUORUM_FILE = join(DATA_DIR, 'privy-quorum.json');
+
+function authorizationContext() {
+  return AUTH_KEY ? { authorization_private_keys: [AUTH_KEY] } : undefined;
+}
+
+// Derive the P-256 public key (base64 DER/SPKI) from the configured private key.
+function appPublicKeyB64() {
+  const priv = createPrivateKey({ key: Buffer.from(AUTH_KEY, 'base64'), format: 'der', type: 'pkcs8' });
+  return createPublicKey(priv).export({ type: 'spki', format: 'der' }).toString('base64');
+}
+
+// The key quorum that holds the app's signing key. Created once and persisted (on the
+// data volume) so we don't mint a new one each boot; reused while the public key matches.
+let _quorumId = null;
+export async function appQuorumId() {
+  if (!AUTH_KEY) return null;
+  if (_quorumId) return _quorumId;
+  const pub = appPublicKeyB64();
+  try {
+    if (existsSync(QUORUM_FILE)) {
+      const saved = JSON.parse(readFileSync(QUORUM_FILE, 'utf8'));
+      if (saved.publicKey === pub && saved.quorumId) return (_quorumId = saved.quorumId);
+    }
+  } catch { /* recreate below */ }
+  const kqRes = typeof client().keyQuorums === 'function' ? client().keyQuorums() : client().keyQuorums;
+  const quorum = await kqRes.create({
+    authorization_threshold: 1,
+    display_name: 'keep-app-signer',
+    public_keys: [pub],
+  });
+  _quorumId = quorum.id;
+  try {
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(QUORUM_FILE, JSON.stringify({ publicKey: pub, quorumId: _quorumId }));
+  } catch (err) {
+    console.error('[privy] could not persist quorum id (will recreate next boot):', err.message);
+  }
+  return _quorumId;
 }
 
 let _client;
@@ -79,7 +137,11 @@ export async function walletSigner(address) {
   const c = client();
   const w = await c.wallets().getWalletByAddress({ address });
   if (!w?.id) throw new Error('no Privy embedded wallet for ' + address);
-  const account = createViemAccount(c, { walletId: w.id, address: w.address });
+  const account = createViemAccount(c, {
+    walletId: w.id,
+    address: w.address,
+    authorizationContext: authorizationContext(), // app's signing key (undefined if unset)
+  });
   return { address: w.address, signTransaction: (txReq) => account.signTransaction(txReq) };
 }
 
@@ -92,7 +154,19 @@ async function getOrCreateWallet(userId) {
   if (!r.ok) throw new Error(`wallet lookup failed (${r.status})`);
   const existing = findEmbeddedWallet(await r.json());
   if (existing) return existing;
-  const wallet = await client().wallets().create({ chain_type: 'ethereum', owner: { user_id: userId } });
+  // The USER owns the wallet; when app-signing is configured, also add the app's key
+  // quorum as an additional signer so the app can later pay FROM this wallet on the
+  // user's behalf (buyer-funded purchases). Without the key, this is a plain user wallet.
+  const createParams = { chain_type: 'ethereum', owner: { user_id: userId } };
+  if (appSigningReady()) {
+    try {
+      const qid = await appQuorumId();
+      if (qid) createParams.additional_signers = [{ signer_id: qid }];
+    } catch (err) {
+      console.error('[privy] additional-signer setup failed; creating a plain wallet:', err.message);
+    }
+  }
+  const wallet = await client().wallets().create(createParams);
   return wallet.address;
 }
 

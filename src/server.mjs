@@ -682,6 +682,14 @@ app.post('/api/market/buy-funded', rateLimit, async (req, res) => {
     });
   } catch (err) {
     console.error('[market] funded buy failed:', err.message);
+    const msg = String(err.message || '');
+    // A wallet created before app-signing was enabled has no app signer → Privy refuses.
+    if (msg.includes('authorization keys') || msg.includes('signing keys')) {
+      return res.status(409).json({
+        error: 'this wallet predates paid purchases — sign in with a new email to get a payable wallet',
+        legacyWallet: true,
+      });
+    }
     res.status(502).json({ error: 'payment failed — please try again' });
   }
 });
