@@ -299,7 +299,7 @@ body {
 .badge.owned { color: var(--own); border-color: var(--own-line); background: rgba(255, 120, 40, 0.12); }
 .badge .own { margin-left: 2px; }
 .badge.call { border-color: var(--accent); }
-.badge.call .label::after { content: ' · 🎯 call'; }
+.badge.call .label::after { content: ' · call'; }
 
 .typing .bubble { color: var(--ink-dim); font-style: italic; }
 
