@@ -245,7 +245,12 @@ async function decorateOwnership(roots) {
       const badge = thread.querySelector(`.badge[data-root-hash="${CSS.escape(rootHash)}"]`);
       if (!badge) continue;
       const turnId = badge.dataset.turnId;
-      if (turnId && !mintOf(turnId)) rememberMint(turnId, info.tokenId, info.txHash, info.anchoredAt);
+      // Cache (or backfill) the mint — including anchoredAt, which older cached
+      // entries (minted before the "call" feature) won't have yet.
+      const cached = turnId && mintOf(turnId);
+      if (turnId && (!cached || cached.anchoredAt == null)) {
+        rememberMint(turnId, info.tokenId, info.txHash, info.anchoredAt);
+      }
       reflectOwned(badge);
     }
   } catch {

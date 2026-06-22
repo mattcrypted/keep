@@ -239,6 +239,9 @@ a.pop-val:hover { text-decoration: underline; }
 
 /* ── "Call your shot" (Track-2 sneak peek) ───────────── */
 .pop-actions { flex-wrap: wrap; }
+/* .pop-row sets display:flex, which overrides the UA [hidden] rule — restore it
+   so the committed-at-block-time proof row actually hides until a call is minted. */
+.pop-row[hidden] { display: none; }
 #call-row .pop-check { display: flex; gap: 6px; align-items: center; color: var(--ink-dim); cursor: pointer; }
 #committed-row .pop-val { color: var(--accent); font-weight: 600; }
 #share-btn {
