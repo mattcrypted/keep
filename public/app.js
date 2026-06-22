@@ -99,7 +99,7 @@ function renderIdentity() {
   if (identity) {
     identityBtn.textContent = shortAddr(identity.address);
     identityBtn.classList.add('ident');
-    identityBtn.title = `Signed in as ${identity.email}\n${identity.address}\n(click to sign out)`;
+    identityBtn.title = `Signed in as ${identity.email}\n${identity.address}\nClick to copy address · Shift-click to sign out`;
   } else {
     identityBtn.textContent = loginReady ? 'sign in' : 'login off';
     identityBtn.classList.remove('ident');
@@ -603,9 +603,30 @@ composer.addEventListener('submit', async (e) => {
 });
 
 // ── Login flow ──────────────────────────────────────────
-identityBtn.addEventListener('click', () => {
+async function copyIdentityAddress() {
+  const prev = shortAddr(identity.address);
+  try {
+    await navigator.clipboard.writeText(identity.address);
+    identityBtn.textContent = 'copied ✓';
+  } catch {
+    // clipboard blocked (non-secure context / permissions) — let the user copy manually
+    window.prompt('Your wallet address:', identity.address);
+    return;
+  }
+  setTimeout(() => {
+    if (identity) identityBtn.textContent = prev;
+  }, 1200);
+}
+
+identityBtn.addEventListener('click', (e) => {
   if (!loginReady) return;
-  if (identity) {
+  if (!identity) {
+    openLogin();
+    return;
+  }
+  // Shift-click signs out; a plain click copies the full address (it's truncated in the
+  // pill, so copy is the only way to get the whole thing — needed to fund / receive).
+  if (e.shiftKey) {
     if (confirm(`Sign out of ${identity.email}? (your memories stay safe on 0G and come back when you sign in again)`)) {
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); // clear the httpOnly cookie
       localStorage.removeItem(LS_IDENTITY);
@@ -614,9 +635,9 @@ identityBtn.addEventListener('click', () => {
       renderIdentity();
       switchIdentity();
     }
-  } else {
-    openLogin();
+    return;
   }
+  copyIdentityAddress();
 });
 
 function openLogin(hint) {
