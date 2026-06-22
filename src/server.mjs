@@ -503,6 +503,11 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
   const priceLabel = capStr(req.body?.priceLabel, 24); // optional explicit display label
   if (!title) return res.status(400).json({ error: 'a title is required' });
 
+  // Optional seller display name: remembered per-address and shown on every listing
+  // (reputation), so buyers see a name, not a raw wallet address.
+  const sellerName = capStr(req.body?.sellerName, 40);
+  if (sellerName) market.setName(owner, sellerName);
+
   // Real price in native OG: validated as a plain decimal, parsed to wei for the
   // on-chain listing. Anything non-positive/unparseable is treated as free (0). This
   // is the price the buyer-funded buy() rail enforces; the label is what the UI shows.
@@ -512,6 +517,11 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
     try { priceWei = ethers.parseEther(priceStr); } catch { priceWei = 0n; }
   }
   const effectiveLabel = priceLabel || (priceWei > 0n ? `${priceStr} OG` : 'Free');
+
+  // What gets sealed: the seller's own message only ('user', the default), or the
+  // full exchange ('full', the user's prompt + Claude's reply). Buyers unlock exactly
+  // this scope. Absent/unknown scope falls back to 'full' for backward compatibility.
+  const scope = req.body?.scope === 'user' ? 'user' : 'full';
 
   // Resolve the source memory's rootHash + ts — live session first, durable index
   // fallback (same resolution as /api/mint).
@@ -538,12 +548,13 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
     // Pull the plaintext memory from 0G, seal it, store the ciphertext as a NEW 0G
     // record (the original memory/rootHash/NFT are read-only and untouched).
     const { record } = await getRecord(sourceRootHash);
-    const plaintext = JSON.stringify({
-      prompt: record.prompt,
-      response: record.response,
-      model: record.model,
-      ts: record.ts,
-    });
+    // 'user' scope seals only the seller's own message (no Claude reply, no model);
+    // 'full' scope seals the whole exchange. The ciphertext on 0G holds exactly this.
+    const plaintext = JSON.stringify(
+      scope === 'user'
+        ? { prompt: record.prompt, ts: record.ts }
+        : { prompt: record.prompt, response: record.response, model: record.model, ts: record.ts }
+    );
     const { envelope, keyB64 } = seal(plaintext, record.model || MODEL);
     const { rootHash: cipherRootHash, txHash: sealTxHash } = await persistWithRetry(envelope);
 
@@ -555,6 +566,7 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
       cipherRootHash,
       title,
       teaser,
+      scope, // 'user' (seller's knowledge only) | 'full' (whole exchange)
       priceLabel: effectiveLabel,
       priceWei: priceWei.toString(), // internal — never in toPublic; the buy() rail enforces it
       model: record.model || MODEL,
@@ -727,8 +739,9 @@ app.post('/api/market/unlock', rateLimit, async (req, res) => {
     const body = JSON.parse(plaintext);
     res.set('Cache-Control', 'no-store'); // decrypted plaintext must never be cached
     res.json({
+      scope: listing.scope || 'full', // 'user' reveals only the seller's knowledge
       prompt: body.prompt,
-      response: body.response,
+      response: body.response, // undefined for 'user'-scope listings
       model: body.model,
       ts: body.ts,
       sourceRootHash: listing.sourceRootHash,

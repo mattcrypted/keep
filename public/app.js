@@ -39,6 +39,29 @@ function revealCards(root) {
   }
 }
 
+// Entrance motion for the About section: fade + rise its blocks with a stagger.
+// Progressive enhancement — if Motion is unavailable the blocks are simply visible.
+function revealAbout() {
+  const root = document.getElementById('about');
+  if (!root) return;
+  const els = root.querySelectorAll('.about-reveal');
+  if (!MOTION || !MOTION.animate) {
+    els.forEach((el) => { el.style.opacity = '1'; el.style.transform = 'none'; });
+    return;
+  }
+  els.forEach((el, i) => {
+    el.style.opacity = '0';
+    const failsafe = setTimeout(() => { el.style.opacity = '1'; el.style.transform = 'none'; }, 1600);
+    try {
+      MOTION.animate(el, { opacity: [0, 1], y: [20, 0] }, { type: 'spring', stiffness: 220, damping: 26, delay: 0.06 * i });
+    } catch {
+      clearTimeout(failsafe);
+      el.style.opacity = '1';
+      el.style.transform = 'none';
+    }
+  });
+}
+
 const LS_ANON = 'keep.anonId';
 const LS_IDENTITY = 'keep.identity'; // { email, address }
 const rootsKey = (id) => 'keep.roots:' + id;
@@ -54,6 +77,10 @@ const proveBtn = document.getElementById('prove');
 const identityBtn = document.getElementById('identity');
 const signoutBtn = document.getElementById('signout');
 const navChat = document.getElementById('nav-chat');
+const navAbout = document.getElementById('nav-about');
+const about = document.getElementById('about');
+const aboutBack = document.getElementById('about-back');
+const aboutCta = document.getElementById('about-cta');
 const galleryBtn = document.getElementById('nav-gallery');
 const gallery = document.getElementById('gallery');
 const galleryGrid = document.getElementById('gallery-grid');
@@ -71,8 +98,11 @@ const sealClose = document.getElementById('seal-close');
 const sealTitle = document.getElementById('seal-title');
 const sealTeaser = document.getElementById('seal-teaser');
 const sealPrice = document.getElementById('seal-price');
+const sealName = document.getElementById('seal-name');
+const sealScope = document.getElementById('seal-scope');
 const sealSubmit = document.getElementById('seal-submit');
 const sealMsg = document.getElementById('seal-msg');
+const LS_NAME = 'keep.sellerName';
 const pillOg = document.getElementById('pill-og');
 const restored = document.getElementById('restored');
 const restoredText = document.getElementById('restored-text');
@@ -880,15 +910,31 @@ function setActiveSection(section) {
   navChat.classList.toggle('active', section === 'chat');
   marketBtn.classList.toggle('active', section === 'market');
   galleryBtn.classList.toggle('active', section === 'gallery');
+  navAbout.classList.toggle('active', section === 'about');
 }
 
 function showChatView() {
   gallery.hidden = true;
   market.hidden = true;
+  if (about) about.hidden = true;
   thread.hidden = false;
   composer.hidden = false;
   setActiveSection('chat');
   updateMemCount(); // restore "prove it" visibility (it belongs to the chat section)
+}
+
+// About: a static, signed-out-friendly explainer of what Keep is. Its own section.
+function showAbout() {
+  popover.hidden = true;
+  thread.hidden = true;
+  composer.hidden = true;
+  restored.hidden = true;
+  gallery.hidden = true;
+  market.hidden = true;
+  about.hidden = false;
+  setActiveSection('about');
+  proveBtn.hidden = true;
+  revealAbout();
 }
 
 function renderNftCard(it) {
@@ -924,6 +970,7 @@ async function openGallery() {
   composer.hidden = true;
   restored.hidden = true;
   market.hidden = true;
+  if (about) about.hidden = true;
   gallery.hidden = false;
   setActiveSection('gallery');
   proveBtn.hidden = true; // "prove it" belongs to the chat section
@@ -954,6 +1001,9 @@ async function openGallery() {
 }
 
 navChat.addEventListener('click', showChatView);
+navAbout.addEventListener('click', showAbout);
+if (aboutBack) aboutBack.addEventListener('click', showChatView);
+if (aboutCta) aboutCta.addEventListener('click', showChatView);
 galleryBtn.addEventListener('click', openGallery);
 galleryBack.addEventListener('click', showChatView);
 
@@ -970,6 +1020,7 @@ async function openMarket() {
   composer.hidden = true;
   restored.hidden = true;
   gallery.hidden = true;
+  if (about) about.hidden = true;
   market.hidden = false;
   setActiveSection('market');
   proveBtn.hidden = true; // "prove it" belongs to the chat section
@@ -1029,7 +1080,7 @@ function renderListingCard(it) {
   thumb.appendChild(preview);
   card.appendChild(thumb);
 
-  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}`));
+  card.appendChild(el('div', 'listing-by', `by ${it.sellerName || it.sellerShort}${mine ? ' · you' : ''}`));
 
   // The decrypted memory drops in here after purchase (hidden until then).
   const body = el('div', 'sealed-body');
@@ -1058,8 +1109,13 @@ function renderListingCard(it) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'unlock failed');
       body.hidden = false;
-      if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
-      body.textContent = d.response || '(empty)';
+      if (d.scope === 'user') {
+        // user-knowledge listing: the seller's own message is the content
+        body.textContent = d.prompt || '(empty)';
+      } else {
+        if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
+        body.textContent = d.response || '(empty)';
+      }
       body.classList.add('revealed');
       actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked, decrypted from 0G'));
     } catch (e) {
@@ -1198,9 +1254,31 @@ function renderListingCard(it) {
 marketBtn.addEventListener('click', openMarket);
 marketBack.addEventListener('click', showChatView);
 
-// ── Seal & list (from a memory's receipt popover) ────────────────────────
+// ── Seal & list ──────────────────────────────────────────────────────────
 let sealTurnId = null;
-function openSeal(turnId) {
+let sealScopeVal = 'user'; // 'user' = just my message | 'full' = the whole exchange
+
+// Segmented "what to list" control.
+if (sealScope) {
+  sealScope.addEventListener('click', (e) => {
+    const opt = e.target.closest('.scope-opt');
+    if (!opt) return;
+    sealScopeVal = opt.dataset.scope === 'full' ? 'full' : 'user';
+    for (const b of sealScope.querySelectorAll('.scope-opt')) {
+      b.classList.toggle('active', b === opt);
+    }
+  });
+}
+function setSealScope(scope) {
+  sealScopeVal = scope === 'full' ? 'full' : 'user';
+  if (sealScope) {
+    for (const b of sealScope.querySelectorAll('.scope-opt')) {
+      b.classList.toggle('active', b.dataset.scope === sealScopeVal);
+    }
+  }
+}
+
+function openSeal(turnId, prefill = {}) {
   if (!identity) {
     popover.hidden = true;
     openLogin('Sign in to seal & list this memory.');
@@ -1208,9 +1286,11 @@ function openSeal(turnId) {
   }
   sealTurnId = turnId;
   popover.hidden = true;
-  sealTitle.value = '';
-  sealTeaser.value = '';
+  sealTitle.value = prefill.title || '';
+  sealTeaser.value = prefill.teaser || '';
   sealPrice.value = '';
+  if (sealName) sealName.value = localStorage.getItem(LS_NAME) || '';
+  setSealScope('user'); // default to "just my message" (your knowledge)
   sealMsg.textContent = '';
   sealMsg.className = 'modal-msg';
   sealSubmit.disabled = false;
@@ -1231,6 +1311,8 @@ sealSubmit.addEventListener('click', async () => {
     sealMsg.className = 'modal-msg bad';
     return;
   }
+  const sellerName = sealName ? sealName.value.trim() : '';
+  if (sellerName) localStorage.setItem(LS_NAME, sellerName); // remember it for next time
   sealSubmit.disabled = true;
   sealMsg.textContent = 'sealing & uploading ciphertext to 0G… (~15s)';
   sealMsg.className = 'modal-msg info';
@@ -1244,6 +1326,8 @@ sealSubmit.addEventListener('click', async () => {
         title,
         teaser: sealTeaser.value.trim(),
         priceOg: sealPrice.value.trim(),
+        scope: sealScopeVal,
+        sellerName,
       }),
     });
     if (r.status === 401) {

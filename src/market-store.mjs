@@ -14,7 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.KEEP_DATA_DIR || join(__dirname, '..', 'data');
 const FILE = join(DATA_DIR, 'market.json');
 
-let _state = { listings: {}, keys: {}, grants: {} };
+let _state = { listings: {}, keys: {}, grants: {}, names: {} };
 try {
   if (existsSync(FILE)) {
     const loaded = JSON.parse(readFileSync(FILE, 'utf8'));
@@ -22,11 +22,12 @@ try {
       listings: loaded.listings || {},
       keys: loaded.keys || {},
       grants: loaded.grants || {},
+      names: loaded.names || {}, // seller address -> chosen display name (for reputation)
     };
   }
 } catch (err) {
   console.error('[market] load failed, starting empty:', err.message);
-  _state = { listings: {}, keys: {}, grants: {} };
+  _state = { listings: {}, keys: {}, grants: {}, names: {} };
 }
 
 function persist() {
@@ -48,8 +49,10 @@ export function toPublic(l) {
     listingId: l.listingId,
     seller: l.seller,
     sellerShort: shortAddr(l.seller),
+    sellerName: _state.names[l.seller] || null, // display name for reputation, if set
     title: l.title,
     teaser: l.teaser,
+    scope: l.scope || 'full', // 'user' = seller's knowledge only | 'full' = whole exchange
     priceLabel: l.priceLabel,
     model: l.model,
     sealedAt: l.sealedAt,
@@ -74,6 +77,15 @@ export function setListTx(id, txHash) {
 }
 export function getListing(id) {
   return _state.listings[id];
+}
+// A seller's chosen display name, applied across ALL their listings so buyers
+// build a memory of the name, not the address. Latest name wins.
+export function setName(addrLower, name) {
+  _state.names[addrLower] = name;
+  persist();
+}
+export function getName(addrLower) {
+  return _state.names[addrLower] || null;
 }
 export function listPublic() {
   return Object.values(_state.listings)

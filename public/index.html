@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
@@ -36,6 +36,9 @@
           </button>
           <button class="nav-item" id="nav-gallery" data-section="gallery" hidden title="Your private collection, every memory you own as an NFT">
             Gallery
+          </button>
+          <button class="nav-item" id="nav-about" data-section="about" title="What Keep is, for first-time visitors">
+            About
           </button>
         </nav>
 
@@ -85,6 +88,99 @@
         </div>
         <div class="market-grid" id="market-grid"></div>
         <div class="market-state" id="market-state" hidden></div>
+      </section>
+
+      <!-- About: what Keep is, for first-time visitors (its own section) -->
+      <section class="about" id="about" hidden>
+        <div class="about-inner">
+          <button class="about-back" id="about-back" title="Back to chat">← back to chat</button>
+
+          <div class="about-hero about-reveal">
+            <div class="about-overline">What is Keep</div>
+            <h1 class="about-h1">An AI that remembers you,<br />and can prove it.</h1>
+            <p class="about-lede">
+              Keep is an AI you talk to like any other, except nothing it remembers lives
+              only on a private server. Every exchange is written to 0G, a decentralized
+              network, as a tamper-evident record you can re-fetch and verify yourself.
+            </p>
+          </div>
+
+          <div class="about-stats about-reveal">
+            <div class="about-stat"><div class="about-stat-n">0G</div><div class="about-stat-l">where memory lives</div></div>
+            <div class="about-stat"><div class="about-stat-n">AES-256</div><div class="about-stat-l">sealed listings</div></div>
+            <div class="about-stat"><div class="about-stat-n">on-chain</div><div class="about-stat-l">owned &amp; settled</div></div>
+            <div class="about-stat"><div class="about-stat-n">email</div><div class="about-stat-l">no wallet to install</div></div>
+          </div>
+
+          <div class="about-overline about-section-label about-reveal">How it works</div>
+
+          <div class="about-steps">
+            <div class="about-step about-reveal">
+              <div class="about-step-num">01</div>
+              <div class="about-step-main">
+                <h3 class="about-step-title">Remembered on 0G</h3>
+                <p class="about-step-text">
+                  Tell Keep something and it is written to 0G with a content hash. Reload,
+                  switch devices, even wipe the server, and it comes back from the chain
+                  unchanged.
+                </p>
+                <div class="about-viz viz-stream" aria-hidden="true">
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="about-step about-reveal">
+              <div class="about-step-num">02</div>
+              <div class="about-step-main">
+                <h3 class="about-step-title">Provable, not trust-me</h3>
+                <p class="about-step-text">
+                  Every reply carries a receipt. Open it and Keep re-fetches the record
+                  from 0G and re-hashes it in front of you, so you see it was never altered.
+                </p>
+                <div class="about-viz viz-radar" aria-hidden="true">
+                  <span class="radar-sweep"></span><span class="radar-blip"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="about-step about-reveal">
+              <div class="about-step-num">03</div>
+              <div class="about-step-main">
+                <h3 class="about-step-title">Yours to own</h3>
+                <p class="about-step-text">
+                  Mint any memory as an NFT on 0G. It lands in your private Gallery and
+                  follows your wallet, so the things you say are assets you hold.
+                </p>
+                <div class="about-viz viz-orbit" aria-hidden="true">
+                  <span class="orbit-ring"></span><span class="orbit-core">◆</span><span class="orbit-dot"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="about-step about-reveal">
+              <div class="about-step-num">04</div>
+              <div class="about-step-main">
+                <h3 class="about-step-title">A Sealed Market</h3>
+                <p class="about-step-text">
+                  Seal a memory, encrypted on 0G, and list it. Buyers pay in OG to unlock
+                  it, settled wallet to wallet on-chain. Sell your knowledge, keep the proof.
+                </p>
+                <div class="about-viz viz-seal" aria-hidden="true">
+                  <span class="seal-ring"></span><span class="seal-ring seal-ring-2"></span><span class="seal-core">⬦</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="about-cta-wrap about-reveal">
+            <p class="about-foot">
+              No wallet to install: sign in with email and a secure wallet is created for
+              you. Built on 0G. A 0G Cup entry.
+            </p>
+            <button class="about-cta" id="about-cta">Start talking to Keep →</button>
+          </div>
+        </div>
       </section>
 
       <div class="restored" id="restored" hidden>
@@ -164,10 +260,15 @@
         <button class="modal-close" id="seal-close" aria-label="Close">×</button>
         <div class="modal-title">Seal &amp; list this memory</div>
         <div class="modal-sub">
-          The full memory is encrypted (AES-256-GCM) and the ciphertext stored on 0G, and the listing is
-          registered on the 0G KeepMarket contract (gas-free for you). Set a price to require payment in OG,
-          or leave it blank for free gas-free access. Buyers see only your title + teaser until they unlock it.
+          Choose what buyers unlock: just your own message (your knowledge), or the full exchange with Keep.
+          It is encrypted and stored on 0G, and the listing is registered on the 0G KeepMarket contract
+          (gas-free for you). Set a price in OG, or leave it blank for free. Buyers see only your title and teaser until they unlock.
         </div>
+        <div class="seal-scope" id="seal-scope" role="group" aria-label="What to list">
+          <button type="button" class="scope-opt active" data-scope="user">Just my message</button>
+          <button type="button" class="scope-opt" data-scope="full">Full exchange</button>
+        </div>
+        <input id="seal-name" type="text" placeholder="Display name (how buyers remember you)" aria-label="Display name" />
         <input id="seal-title" type="text" placeholder="Title, e.g. ETH H2 call" aria-label="Title" />
         <input id="seal-teaser" type="text" placeholder="Public teaser (a hint; the body stays sealed)" aria-label="Teaser" />
         <input id="seal-price" type="number" min="0" step="0.001" placeholder="Price in OG (optional), e.g. 0.05" aria-label="Price in OG" />
