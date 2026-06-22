@@ -45,16 +45,21 @@ export function verifyToken(token, now = Date.now()) {
   return { address: data.a };
 }
 
+// `Secure` is added under HTTPS (Railway / production) and omitted on localhost
+// http, where browsers would otherwise drop the cookie and break login. The app is
+// single-origin (static UI + API on one host), so SameSite=Lax is correct — only
+// switch to SameSite=None (with Secure) if the frontend ever moves cross-origin.
+const SECURE = process.env.KEEP_HTTPS === '1' || process.env.NODE_ENV === 'production';
+const COOKIE_ATTRS = `HttpOnly; SameSite=Lax; Path=/${SECURE ? '; Secure' : ''}`;
+
 export function setSessionCookie(res, token) {
-  // `Secure` is omitted for localhost http; add it (and SameSite=None for a
-  // cross-origin deploy) behind https in production.
   res.setHeader(
     'Set-Cookie',
-    `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(TTL_MS / 1000)}`
+    `${COOKIE}=${token}; ${COOKIE_ATTRS}; Max-Age=${Math.floor(TTL_MS / 1000)}`
   );
 }
 export function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.setHeader('Set-Cookie', `${COOKIE}=; ${COOKIE_ATTRS}; Max-Age=0`);
 }
 
 // The authenticated wallet address for this request (lowercased), or null.
