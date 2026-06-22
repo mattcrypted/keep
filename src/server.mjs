@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { buildRecord, recordHash, putRecord, getRecord, rootHashOf, walletStatus } from './og.mjs';
 import { chat, llmReady, MODEL } from './llm.mjs';
 import { addToIndex, getIndex } from './index-store.mjs';
-import { mintMemory, mintingReady, contractAddress, mintStatusOf } from './chain.mjs';
+import { mintMemory, mintingReady, contractAddress, mintStatusOf, galleryOf } from './chain.mjs';
 import { sendEmailCode, verifyEmailCode, privyReady } from './privy.mjs';
 import {
   issueToken,
@@ -433,6 +433,42 @@ app.post('/api/owned', rateLimit, async (req, res) => {
     })
   );
   res.json({ owned });
+});
+
+// ── Gallery: a signed-in user's PRIVATE collection — every memory they've minted,
+// enumerated from the chain (MemoryAnchored events for their address), with the
+// content re-fetched from 0G. Read-only and gated to the owning identity: the
+// `owner` is the cookie-verified wallet, never client-supplied.
+app.get('/api/gallery/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+  if (!mintingReady()) return res.json({ items: [] });
+  if (!gateSession(req, res, sessionId)) return;
+  const owner = sessionAddress(req);
+  if (!owner) return res.json({ items: [] }); // anonymous sessions own nothing
+
+  try {
+    const tokens = await galleryOf(owner);
+    // Pull each memory's content from 0G in parallel; content is best-effort so a
+    // single slow/unavailable record never blanks the whole gallery.
+    const items = await Promise.all(
+      tokens.map(async (t) => {
+        let prompt = null;
+        let response = null;
+        try {
+          const { record } = await getRecord(t.rootHash);
+          prompt = record.prompt;
+          response = record.response;
+        } catch {
+          /* leave content null — card still shows tokenId + on-chain proof */
+        }
+        return { ...t, prompt, response };
+      })
+    );
+    res.json({ owner, items });
+  } catch (err) {
+    console.error('[gallery] failed:', err.message);
+    res.status(502).json({ error: 'could not load your gallery — please try again.' });
+  }
 });
 
 // ── Identity: email-OTP login via Privy → embedded wallet address = identity.

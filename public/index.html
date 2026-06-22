@@ -31,6 +31,14 @@
           >
             prove it ⟲
           </button>
+          <button
+            class="pill action"
+            id="gallery-btn"
+            hidden
+            title="Your private collection — every memory you own as an NFT"
+          >
+            your gallery ⬦
+          </button>
           <button class="pill ident" id="identity" title="Your portable Keep identity">sign in</button>
         </div>
       </header>
@@ -38,6 +46,19 @@
       <main class="thread" id="thread">
         <!-- messages injected here -->
       </main>
+
+      <!-- Private gallery: the signed-in user's owned memories (its own section) -->
+      <section class="gallery" id="gallery" hidden>
+        <div class="gallery-head">
+          <button class="gallery-back" id="gallery-back" title="Back to chat">← back to chat</button>
+          <div class="gallery-headings">
+            <div class="gallery-title">Your memories on 0G</div>
+            <div class="gallery-sub" id="gallery-sub">everything you own, sealed on-chain</div>
+          </div>
+        </div>
+        <div class="gallery-grid" id="gallery-grid"></div>
+        <div class="gallery-state" id="gallery-state" hidden></div>
+      </section>
 
       <div class="restored" id="restored" hidden>
         ↻ <span id="restored-text"></span>

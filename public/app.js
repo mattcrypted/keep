@@ -16,6 +16,12 @@ const memCount = document.getElementById('mem-count');
 const memSaving = document.getElementById('mem-saving');
 const proveBtn = document.getElementById('prove');
 const identityBtn = document.getElementById('identity');
+const galleryBtn = document.getElementById('gallery-btn');
+const gallery = document.getElementById('gallery');
+const galleryGrid = document.getElementById('gallery-grid');
+const gallerySub = document.getElementById('gallery-sub');
+const galleryState = document.getElementById('gallery-state');
+const galleryBack = document.getElementById('gallery-back');
 const pillOg = document.getElementById('pill-og');
 const pillLlm = document.getElementById('pill-llm');
 const restored = document.getElementById('restored');
@@ -87,6 +93,8 @@ function renderIdentity() {
       ? 'Sign in to own your memories and keep them across devices'
       : 'Login not configured (no Privy keys)';
   }
+  // The gallery is private: only a signed-in identity owns memories to show.
+  if (galleryBtn) galleryBtn.hidden = !identity;
 }
 
 // ── Per-identity receipt index ──────────────────────────
@@ -706,6 +714,7 @@ loginResend.addEventListener('click', async () => {
 
 // Re-render the thread for the current identity (after login/logout).
 async function switchIdentity() {
+  showChatView(); // leave the gallery if it was open
   thread.replaceChildren();
   restored.hidden = true;
   toldCount = 0;
@@ -751,6 +760,76 @@ proveBtn.addEventListener('click', async () => {
   }
   location.reload();
 });
+
+// ── Gallery: your private collection of owned memory NFTs ────────────────
+// Signed-in only. Chain-sourced (the server reads MemoryAnchored for your
+// address), content re-fetched from 0G. Its own full-section view, not a popover.
+function showChatView() {
+  gallery.hidden = true;
+  thread.hidden = false;
+  composer.hidden = false;
+}
+
+function renderNftCard(it) {
+  const card = el('div', 'nft-card');
+  card.appendChild(el('div', 'nft-id', `Memory #${it.tokenId} ⬦`));
+  if (it.prompt) card.appendChild(el('div', 'nft-prompt', `“${it.prompt}”`));
+  card.appendChild(el('div', 'nft-response', it.response || '(content lives on 0G)'));
+
+  const meta = el('div', 'nft-meta');
+  if (it.anchoredAt) {
+    meta.appendChild(el('div', 'nft-committed', `committed at block-time ${fmtTime(it.anchoredAt * 1000)}`));
+  }
+  meta.appendChild(el('div', null, `model · ${it.model || '—'}`));
+  if (it.rootHash) {
+    meta.appendChild(el('div', 'nft-root', `${it.rootHash.slice(0, 10)}…${it.rootHash.slice(-6)}`));
+  }
+  if (it.txHash) {
+    const a = document.createElement('a');
+    a.href = `https://chainscan-galileo.0g.ai/tx/${it.txHash}`;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'view mint on-chain ↗';
+    meta.appendChild(a);
+  }
+  card.appendChild(meta);
+  return card;
+}
+
+async function openGallery() {
+  if (!identity) return;
+  popover.hidden = true;
+  thread.hidden = true;
+  composer.hidden = true;
+  restored.hidden = true;
+  gallery.hidden = false;
+  galleryGrid.replaceChildren();
+  galleryState.hidden = false;
+  galleryState.textContent = 'loading your collection from 0G…';
+  gallerySub.textContent = 'everything you own, anchored on-chain';
+  try {
+    const res = await fetch(`/api/gallery/${encodeURIComponent(sessionId)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'could not load your gallery');
+    const items = data.items || [];
+    if (!items.length) {
+      galleryState.hidden = false;
+      galleryState.textContent = 'No memories owned yet — mint one from the chat and it’ll appear here as yours.';
+      gallerySub.textContent = '0 owned';
+      return;
+    }
+    galleryState.hidden = true;
+    gallerySub.textContent = `${items.length} memor${items.length === 1 ? 'y' : 'ies'} you own`;
+    for (const it of items) galleryGrid.appendChild(renderNftCard(it));
+  } catch (err) {
+    galleryState.hidden = false;
+    galleryState.textContent = `✕ ${err.message}`;
+    gallerySub.textContent = '';
+  }
+}
+
+galleryBtn.addEventListener('click', openGallery);
+galleryBack.addEventListener('click', showChatView);
 
 // Recover rootHashes the browser never captured by merging the server index.
 async function mergeServerRoots() {

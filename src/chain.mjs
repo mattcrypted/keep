@@ -98,3 +98,44 @@ export async function mintStatusOf(rootHash) {
   if (!owner || owner === ethers.ZeroAddress) return { minted: false };
   return { minted: true, owner, ...(await tokenInfo(c, rootHash)) };
 }
+
+// Deployment block, so the gallery event query starts from when the contract first
+// existed instead of block 0 (a tighter range some RPCs require for getLogs).
+let _deployBlock;
+async function deployBlock(c) {
+  if (_deployBlock !== undefined) return _deployBlock;
+  try {
+    const rc = _deploy?.txHash ? await c.runner.provider.getTransactionReceipt(_deploy.txHash) : null;
+    _deployBlock = rc ? rc.blockNumber : 0;
+  } catch {
+    _deployBlock = 0;
+  }
+  return _deployBlock;
+}
+
+// ── Gallery: every memory an address has minted, sourced from the chain. The
+// MemoryAnchored event's `owner` is INDEXED, so we enumerate an address's tokens
+// by event filter — no ERC721Enumerable needed, and it's portable across devices
+// (the chain is the source of truth, not the browser). Returns newest-first.
+export async function galleryOf(owner) {
+  const c = contract();
+  const from = await deployBlock(c);
+  const logs = await c.queryFilter(c.filters.MemoryAnchored(null, null, owner), from, 'latest');
+  const seen = new Set();
+  const items = [];
+  for (const l of logs) {
+    const tokenId = l.args.tokenId.toString();
+    if (seen.has(tokenId)) continue; // defensive de-dupe
+    seen.add(tokenId);
+    items.push({
+      tokenId,
+      rootHash: l.args.rootHash,
+      model: l.args.model,
+      ts: Number(l.args.ts),
+      anchoredAt: Number(l.args.anchoredAt),
+      txHash: l.transactionHash,
+    });
+  }
+  items.sort((a, b) => b.anchoredAt - a.anchoredAt);
+  return items;
+}
