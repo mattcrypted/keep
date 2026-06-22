@@ -6,6 +6,7 @@
 // localStorage-isn't-portable problem.
 import 'dotenv/config';
 import { PrivyClient } from '@privy-io/node';
+import { createViemAccount } from '@privy-io/node/viem';
 
 const APP_ID = process.env.PRIVY_APP_ID;
 const APP_SECRET = process.env.PRIVY_APP_SECRET;
@@ -67,6 +68,19 @@ export async function verifyEmailCode(email, code) {
   const verifiedEmail = findEmail(data.user) || findEmail(data) || email;
 
   return { userId, address, email: verifiedEmail };
+}
+
+// Resolve a user's embedded wallet by ADDRESS and return a signer. Privy's TEE signs
+// the transaction (the user's keys never leave it); we broadcast it on 0G ourselves —
+// so it works regardless of whether Privy "supports" 0G (proven in scripts/privy-spike).
+// This is how a buyer's OWN wallet funds a real purchase: the cookie-authenticated buyer
+// authorizes; their embedded wallet (not the relayer) pays.
+export async function walletSigner(address) {
+  const c = client();
+  const w = await c.wallets().getWalletByAddress({ address });
+  if (!w?.id) throw new Error('no Privy embedded wallet for ' + address);
+  const account = createViemAccount(c, { walletId: w.id, address: w.address });
+  return { address: w.address, signTransaction: (txReq) => account.signTransaction(txReq) };
 }
 
 async function getOrCreateWallet(userId) {

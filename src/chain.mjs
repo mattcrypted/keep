@@ -9,15 +9,35 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { signer } from './og.mjs';
+import { walletSigner } from './privy.mjs';
+
+// Fail fast instead of hanging a request when the 0G RPC is slow or a tx never mines.
+// Every market chain call wraps in this so the route's try/catch fallback fires quickly.
+function withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms);
+    t.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEPLOY = join(__dirname, '..', 'data', 'deploy.json');
+const MARKET_DEPLOY = join(__dirname, '..', 'data', 'market-deploy.json');
 
 let _deploy = null;
 try {
   if (existsSync(DEPLOY)) _deploy = JSON.parse(readFileSync(DEPLOY, 'utf8'));
 } catch (err) {
   console.error('[chain] failed to load deploy.json:', err.message);
+}
+
+let _marketDeploy = null;
+try {
+  if (existsSync(MARKET_DEPLOY)) _marketDeploy = JSON.parse(readFileSync(MARKET_DEPLOY, 'utf8'));
+} catch (err) {
+  console.error('[chain] failed to load market-deploy.json:', err.message);
 }
 
 let _contract;
@@ -138,4 +158,108 @@ export async function galleryOf(owner) {
   }
   items.sort((a, b) => b.anchoredAt - a.anchoredAt);
   return items;
+}
+
+// ── KeepMarket: on-chain settlement + access for the Sealed Market. Same relayer
+// (OG_KEY) is the contract owner; it lists on the seller's behalf and records relayed
+// purchases gaslessly (mirroring mint). The buyer-funded buy() path is permissionless
+// and lives in the contract for when a buyer wallet holds OG. The unlock gate reads
+// hasPurchased() so "who may decrypt" is a verifiable on-chain fact, not a server flag.
+let _market;
+function marketContract() {
+  if (!_marketDeploy) throw new Error('KeepMarket not deployed — run `npm run deploy:market`');
+  return (_market ??= new ethers.Contract(_marketDeploy.address, _marketDeploy.abi, signer()));
+}
+
+export function marketReady() {
+  return !!_marketDeploy;
+}
+export function marketAddress() {
+  return _marketDeploy?.address || null;
+}
+
+// Listing ids are UUIDs off-chain; on-chain they key by keccak256 of the UUID bytes.
+export function listingKey(listingId) {
+  return ethers.keccak256(ethers.toUtf8Bytes(String(listingId)));
+}
+
+// Register a listing on-chain (relayer pays gas; seller is fixed once set). priceWei is
+// a bigint/string in wei of native OG (0 = display-only price). Returns the tx hash.
+export async function listOnChain(listingId, seller, priceWei = 0n) {
+  const c = marketContract();
+  const rc = await withTimeout(
+    (async () => (await c.list(listingKey(listingId), seller, priceWei)).wait())(),
+    20000,
+    'list'
+  );
+  return { txHash: rc.hash };
+}
+
+// Record a relayer-settled purchase for `buyer` (gas-abstracted, no value moves).
+// Idempotent on-chain. Returns the tx hash.
+export async function recordPurchaseOnChain(listingId, buyer) {
+  const c = marketContract();
+  const rc = await withTimeout(
+    (async () => (await c.recordPurchase(listingKey(listingId), buyer)).wait())(),
+    20000,
+    'recordPurchase'
+  );
+  return { txHash: rc.hash };
+}
+
+// The on-chain access fact the unlock gate reads. Short timeout: a slow read must not
+// stall unlock — the route falls back to the local grant.
+export async function hasPurchasedOnChain(listingId, buyer) {
+  const c = marketContract();
+  return withTimeout(c.hasPurchased(listingKey(listingId), buyer), 8000, 'hasPurchased');
+}
+
+// The exact on-chain listing the buy() rail enforces — read straight from the contract
+// (defense-in-depth vs the off-chain priceLabel; the chain price is the source of truth).
+export async function listingOnChain(listingId) {
+  const c = marketContract();
+  const l = await withTimeout(c.listings(listingKey(listingId)), 8000, 'listings');
+  return { seller: l.seller, price: l.price, exists: l.exists };
+}
+
+// Native OG balance of an address (decide funded-vs-relayed; surface relayer health).
+export async function balanceOf(address) {
+  return withTimeout(signer().provider.getBalance(address), 8000, 'balanceOf');
+}
+
+// BUYER-FUNDED purchase: the buyer's OWN embedded wallet pays the on-chain price in
+// native OG via buy(). Privy signs (TEE); we broadcast on 0G. Returns { txHash, pricePaid }
+// on a mined, successful tx. Throws on insufficient funds / revert (the caller decides
+// whether to surface "fund your wallet" — it never silently falls back to a free record).
+export async function buyFundedOnChain(listingId, buyerAddress) {
+  const c = marketContract();
+  const key = listingKey(listingId);
+  const l = await c.listings(key);
+  if (!l.exists) throw new Error('listing not on-chain');
+  const price = l.price; // EXACT value the contract requires (buy() enforces ==)
+  const data = c.interface.encodeFunctionData('buy', [key]);
+  const provider = signer().provider;
+  const to = _marketDeploy.address;
+
+  const { signTransaction } = await walletSigner(buyerAddress);
+  const nonce = await provider.getTransactionCount(buyerAddress, 'pending');
+  const fee = await provider.getFeeData();
+  const feeFields = fee.maxFeePerGas
+    ? { type: 'eip1559', maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? fee.maxFeePerGas }
+    : { type: 'legacy', gasPrice: fee.gasPrice ?? ethers.parseUnits('4', 'gwei') };
+
+  let gas;
+  try {
+    gas = ((await provider.estimateGas({ from: buyerAddress, to, data, value: price })) * 12n) / 10n;
+  } catch {
+    gas = 150000n; // estimate reverts when the buyer is underfunded — broadcast will surface it
+  }
+
+  const raw = await signTransaction({
+    to, value: price, data, chainId: _marketDeploy.chainId || 16602, nonce, gas, ...feeFields,
+  });
+  const sent = await withTimeout(provider.broadcastTransaction(raw), 20000, 'buy-broadcast');
+  const rc = await withTimeout(sent.wait(), 30000, 'buy-confirm');
+  if (!rc || rc.status !== 1) throw new Error('buy transaction failed on-chain');
+  return { txHash: sent.hash, pricePaid: price.toString() };
 }

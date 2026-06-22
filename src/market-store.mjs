@@ -56,12 +56,21 @@ export function toPublic(l) {
     createdAt: l.createdAt,
     cipherRootHash: l.cipherRootHash,
     sourceRootHash: l.sourceRootHash,
+    listTxHash: l.listTxHash || null, // on-chain provenance of the listing (public)
   };
 }
 
 export function addListing(listing) {
   _state.listings[listing.listingId] = listing;
   persist();
+}
+// Record the on-chain listing tx hash once list() lands (provenance + UI link).
+export function setListTx(id, txHash) {
+  const l = _state.listings[id];
+  if (l) {
+    l.listTxHash = txHash;
+    persist();
+  }
 }
 export function getListing(id) {
   return _state.listings[id];
@@ -91,6 +100,14 @@ export function grantBuyer(id, addrLower) {
 }
 export function hasGrant(id, addrLower) {
   return !!(_state.grants[id] && _state.grants[id][addrLower]);
+}
+
+// Dedupe: an existing listing by this seller for this exact source memory. Re-sealing
+// the same memory returns it instead of paying for another upload + another list() tx.
+export function findBySource(sellerLower, sourceRootHash) {
+  return Object.values(_state.listings).find(
+    (l) => l.seller === sellerLower && l.sourceRootHash === sourceRootHash
+  );
 }
 
 // For the UI's owner/unlocked states.

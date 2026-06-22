@@ -13,7 +13,12 @@ import { dirname, join } from 'node:path';
 import { buildRecord, recordHash, putRecord, getRecord, rootHashOf, walletStatus } from './og.mjs';
 import { chat, llmReady, MODEL } from './llm.mjs';
 import { addToIndex, getIndex } from './index-store.mjs';
-import { mintMemory, mintingReady, contractAddress, mintStatusOf, galleryOf } from './chain.mjs';
+import {
+  mintMemory, mintingReady, contractAddress, mintStatusOf, galleryOf,
+  marketReady, marketAddress, listOnChain, recordPurchaseOnChain, hasPurchasedOnChain,
+  buyFundedOnChain, listingOnChain, balanceOf,
+} from './chain.mjs';
+import { ethers } from 'ethers';
 import { seal, open } from './seal.mjs';
 import * as market from './market-store.mjs';
 import { randomUUID } from 'node:crypto';
@@ -495,8 +500,18 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
 
   const title = capStr(req.body?.title, 120);
   const teaser = capStr(req.body?.teaser, 280); // an intentional public preview; the BODY is what's sealed
-  const priceLabel = capStr(req.body?.priceLabel, 24); // display-only
+  const priceLabel = capStr(req.body?.priceLabel, 24); // optional explicit display label
   if (!title) return res.status(400).json({ error: 'a title is required' });
+
+  // Real price in native OG: validated as a plain decimal, parsed to wei for the
+  // on-chain listing. Anything non-positive/unparseable is treated as free (0). This
+  // is the price the buyer-funded buy() rail enforces; the label is what the UI shows.
+  let priceWei = 0n;
+  const priceStr = String(req.body?.priceOg ?? '').trim();
+  if (/^\d{1,9}(\.\d{1,18})?$/.test(priceStr)) {
+    try { priceWei = ethers.parseEther(priceStr); } catch { priceWei = 0n; }
+  }
+  const effectiveLabel = priceLabel || (priceWei > 0n ? `${priceStr} OG` : 'Free');
 
   // Resolve the source memory's rootHash + ts — live session first, durable index
   // fallback (same resolution as /api/mint).
@@ -513,6 +528,11 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
   if (!sourceRootHash) {
     return res.status(404).json({ error: 'memory not found or not yet stored on 0G' });
   }
+
+  // Dedupe: if this seller already listed this exact memory, return that listing instead
+  // of re-sealing + paying for another 0G upload + another list() tx (anti-spam, idempotent).
+  const dup = market.findBySource(owner, sourceRootHash);
+  if (dup) return res.json(market.toPublic(dup));
 
   try {
     // Pull the plaintext memory from 0G, seal it, store the ciphertext as a NEW 0G
@@ -535,13 +555,27 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
       cipherRootHash,
       title,
       teaser,
-      priceLabel,
+      priceLabel: effectiveLabel,
+      priceWei: priceWei.toString(), // internal — never in toPublic; the buy() rail enforces it
       model: record.model || MODEL,
       sealedAt: envelope.sealedAt,
       sealTxHash,
       createdAt: Date.now(),
     });
     market.setKey(listingId, keyB64); // server-custodied key — never leaves the server
+
+    // Register the listing on 0G (relayer pays gas, gasless for the seller) so purchases
+    // can be settled + verified on-chain. Best-effort: a chain hiccup must NOT fail the
+    // seal — the listing still exists off-chain and the grant fallback covers unlock.
+    if (marketReady()) {
+      try {
+        const { txHash } = await listOnChain(listingId, owner, priceWei);
+        market.setListTx(listingId, txHash);
+      } catch (err) {
+        console.error('[market] on-chain list failed (listing still off-chain):', err.message);
+      }
+    }
+
     countSpend(req); // a real 0G upload just succeeded
     res.json(market.toPublic(market.getListing(listingId)));
   } catch (err) {
@@ -551,21 +585,105 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
 });
 
 // BROWSE: public bazaar. Only the whitelisted public projection — no key, no body.
+// Also surfaces the on-chain market address + explorer base so the UI can link the
+// trustless settlement layer.
 app.get('/api/market/listings', (_req, res) => {
-  res.json({ listings: market.listPublic() });
+  res.json({
+    listings: market.listPublic(),
+    market: marketAddress(),
+    chainBase: 'https://chainscan-galileo.0g.ai',
+  });
 });
 
-// BUY: record a purchase grant for the cookie-verified buyer. Payment is MOCKED
-// (no value moves; priceLabel is display-only) and labeled roadmap; the
-// authorization grant is real, server-side, and idempotent (replay-safe).
-app.post('/api/market/buy', rateLimit, (req, res) => {
+// BUY: settle a purchase for the cookie-verified buyer. The purchase is recorded
+// IMMUTABLY ON 0G (relayer-settled, gas-abstracted — mirroring Keep's gasless mint),
+// so the unlock gate becomes a verifiable chain fact instead of a server flag. The
+// local grant is kept as a cache + a fallback so a brief chain hiccup never hard-breaks
+// the demo. (Buyer-FUNDED settlement — real OG to the seller — is the contract's buy()
+// rail, live the moment a buyer wallet holds OG; the relayer path needs no buyer gas.)
+app.post('/api/market/buy', rateLimit, async (req, res) => {
   const buyer = sessionAddress(req);
   if (!buyer) return res.status(401).json({ error: 'sign in to buy' });
   const { listingId } = req.body || {};
   if (typeof listingId !== 'string') return res.status(400).json({ error: 'listingId required' });
-  if (!market.getListing(listingId)) return res.status(404).json({ error: 'listing not found' });
-  market.grantBuyer(listingId, buyer);
-  res.json({ purchased: true });
+  const listing = market.getListing(listingId);
+  if (!listing) return res.status(404).json({ error: 'listing not found' });
+
+  // Buying your own listing is a no-op — the seller can always unlock their own memory.
+  if (buyer === listing.seller) {
+    market.grantBuyer(listingId, buyer);
+    return res.json({ purchased: true, rail: 'relayed', onChain: false, note: 'you are the seller' });
+  }
+
+  // Priced listings settle REAL OG via the buyer-funded rail; the gas-free access record
+  // is only for free listings. Keeps "paid" honest — no free access to a priced item.
+  if (listing.priceWei && BigInt(listing.priceWei) > 0n) {
+    return res.status(409).json({ error: 'this is a paid listing — pay in OG to unlock', funded: true });
+  }
+
+  let onChain = false;
+  let txHash = null;
+  if (marketReady()) {
+    try {
+      ({ txHash } = await recordPurchaseOnChain(listingId, buyer));
+      onChain = true;
+    } catch (err) {
+      console.error('[market] on-chain purchase failed, granting off-chain:', err.message);
+    }
+  }
+  market.grantBuyer(listingId, buyer); // idempotent local record (cache / fallback)
+  res.json({
+    purchased: true,
+    rail: 'relayed',
+    onChain,
+    txHash,
+    explorerUrl: txHash ? `https://chainscan-galileo.0g.ai/tx/${txHash}` : null,
+  });
+});
+
+// BUY (FUNDED): the buyer's OWN embedded wallet pays the seller REAL OG via the contract's
+// buy() rail. Privy signs with the buyer's wallet (TEE); we broadcast on 0G. Value actually
+// moves buyer -> seller (claimable via withdraw()). This is the path for PRICED listings.
+app.post('/api/market/buy-funded', rateLimit, async (req, res) => {
+  const buyer = sessionAddress(req);
+  if (!buyer) return res.status(401).json({ error: 'sign in to buy' });
+  if (!privyReady()) return res.status(503).json({ error: 'wallet signing not configured' });
+  if (!marketReady()) return res.status(503).json({ error: 'market contract not deployed' });
+  const { listingId } = req.body || {};
+  if (typeof listingId !== 'string') return res.status(400).json({ error: 'listingId required' });
+  const listing = market.getListing(listingId);
+  if (!listing) return res.status(404).json({ error: 'listing not found' });
+  if (buyer === listing.seller) return res.status(400).json({ error: 'you are the seller' });
+
+  try {
+    // Exact price the contract enforces + the buyer's balance → a precise "fund your
+    // wallet" message instead of a raw revert.
+    const onchain = await listingOnChain(listingId);
+    if (!onchain.exists) {
+      return res.status(409).json({ error: 'this listing is not on-chain yet — reseal it to enable paid purchase' });
+    }
+    const bal = await balanceOf(buyer);
+    if (bal < onchain.price) {
+      return res.status(402).json({
+        error: 'not enough OG in your wallet to pay',
+        needWei: onchain.price.toString(),
+        haveWei: bal.toString(),
+      });
+    }
+    const { txHash, pricePaid } = await buyFundedOnChain(listingId, buyer);
+    market.grantBuyer(listingId, buyer); // local cache; the chain is authoritative
+    res.json({
+      purchased: true,
+      rail: 'funded',
+      onChain: true,
+      txHash,
+      pricePaid,
+      explorerUrl: `https://chainscan-galileo.0g.ai/tx/${txHash}`,
+    });
+  } catch (err) {
+    console.error('[market] funded buy failed:', err.message);
+    res.status(502).json({ error: 'payment failed — please try again' });
+  }
 });
 
 // UNLOCK — THE GATE. Identity is the cookie's wallet ONLY (never a body/query
@@ -580,7 +698,19 @@ app.post('/api/market/unlock', rateLimit, async (req, res) => {
   if (typeof listingId !== 'string') return res.status(400).json({ error: 'listingId required' });
   const listing = market.getListing(listingId);
   if (!listing) return res.status(404).json({ error: 'listing not found' });
-  const allowed = caller === listing.seller || market.hasGrant(listingId, caller);
+
+  // THE GATE — chain-first: "who may decrypt" is read from 0G (hasPurchased), not a
+  // server flag. The seller always passes; the local grant is a fallback if the chain
+  // read fails or the listing predates on-chain settlement.
+  let allowed = caller === listing.seller;
+  if (!allowed && marketReady()) {
+    try {
+      allowed = await hasPurchasedOnChain(listingId, caller);
+    } catch (err) {
+      console.error('[market] chain gate read failed, falling back to grant:', err.message);
+    }
+  }
+  if (!allowed) allowed = market.hasGrant(listingId, caller);
   if (!allowed) return res.status(403).json({ error: 'purchase required to unlock' });
   try {
     const keyB64 = market.getKey(listingId);

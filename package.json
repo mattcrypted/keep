@@ -9,6 +9,7 @@
     "spike": "node scripts/spike.mjs",
     "privy-spike": "node scripts/privy-spike.mjs",
     "deploy:contract": "node scripts/deploy-contract.mjs",
+    "deploy:market": "node scripts/deploy-market.mjs",
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs"
   },

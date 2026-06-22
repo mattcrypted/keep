@@ -857,6 +857,7 @@ galleryBack.addEventListener('click', showChatView);
 // The decryption key NEVER reaches the client — /api/market/unlock returns the
 // already-decrypted plaintext only to the seller or a recorded purchaser.
 let purchasedSet = new Set();
+let marketChain = { address: null, base: 'https://chainscan-galileo.0g.ai' };
 
 async function openMarket() {
   popover.hidden = true;
@@ -885,6 +886,7 @@ async function openMarket() {
     const res = await fetch('/api/market/listings');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'could not load the market');
+    marketChain = { address: data.market || null, base: data.chainBase || marketChain.base };
     const items = data.listings || [];
     if (!items.length) {
       marketState.hidden = false;
@@ -951,15 +953,41 @@ function renderListingCard(it) {
     }
   };
 
+  // Priced listings settle REAL OG via the buyer-funded rail; free listings use the
+  // gas-free relayer access record. The copy is honest per rail — "paid" only when value moved.
+  const priced = !!(it.priceLabel && it.priceLabel !== 'Free');
+  const buyLabel = priced ? `Pay ${it.priceLabel}` : 'Get access';
+
+  const onPurchased = (d) => {
+    purchasedSet.add(it.listingId);
+    btn.disabled = false;
+    btn.textContent = 'Reveal';
+    btn.onclick = reveal;
+    note.className = 'listing-note ok';
+    const label = d.rail === 'funded'
+      ? `✓ paid ${it.priceLabel} on 0G · `        // real OG moved buyer → seller
+      : '✓ access recorded on 0G (gas-free) · ';   // relayer record, no value moved
+    if (d.onChain && d.explorerUrl) {
+      note.replaceChildren(document.createTextNode(label));
+      const a = el('a', 'listing-root', 'view tx ↗');
+      a.href = d.explorerUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      note.appendChild(a);
+    } else {
+      note.textContent = '✓ access recorded (locally — on-chain record pending)';
+    }
+  };
+
   const doBuy = async () => {
     if (!identity) {
       openLogin('Sign in to buy and unlock sealed memories.');
       return;
     }
     btn.disabled = true;
-    btn.textContent = 'purchasing…';
+    btn.textContent = priced ? `paying ${it.priceLabel}…` : 'recording…';
     try {
-      const r = await fetch('/api/market/buy', {
+      const r = await fetch(priced ? '/api/market/buy-funded' : '/api/market/buy', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ listingId: it.listingId }),
@@ -967,19 +995,16 @@ function renderListingCard(it) {
       if (r.status === 401) {
         openLogin('Sign in to buy sealed memories.');
         btn.disabled = false;
-        btn.textContent = 'Buy to unlock';
+        btn.textContent = buyLabel;
         return;
       }
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 402) throw new Error(`not enough OG — fund your wallet to pay ${it.priceLabel}`);
       if (!r.ok) throw new Error(d.error || 'purchase failed');
-      purchasedSet.add(it.listingId);
-      note.replaceChildren();
-      btn.disabled = false;
-      btn.textContent = 'Reveal';
-      btn.onclick = reveal;
+      onPurchased(d);
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = 'Buy to unlock';
+      btn.textContent = buyLabel;
       note.textContent = `✕ ${e.message}`;
       note.className = 'listing-note bad';
     }
@@ -989,9 +1014,11 @@ function renderListingCard(it) {
     btn.textContent = mine ? 'Reveal (yours)' : 'Reveal';
     btn.onclick = reveal;
   } else {
-    btn.textContent = 'Buy to unlock';
+    btn.textContent = buyLabel;
     btn.onclick = doBuy;
-    note.textContent = 'simulated purchase — unlocks real sealed content';
+    note.textContent = priced
+      ? 'pay in OG — settles buyer → seller on 0G, unlocks the sealed memory'
+      : 'gas-free access record on 0G — unlocks real sealed content';
   }
   actions.appendChild(btn);
   if (note.textContent) actions.appendChild(note);
@@ -1030,6 +1057,23 @@ function renderListingCard(it) {
   ver.appendChild(vlink);
   ver.appendChild(vres);
   card.appendChild(ver);
+
+  // On-chain settlement provenance: the listing + its purchases settle on 0G via the
+  // KeepMarket contract — the unlock gate reads that chain state, not a server flag.
+  if (marketChain.address) {
+    const settle = el('div', 'listing-verify');
+    settle.appendChild(el('span', null, 'registered on 0G'));
+    const onTx = !!it.listTxHash;
+    const slink = el('a', 'listing-root', onTx
+      ? `${it.listTxHash.slice(0, 10)}…${it.listTxHash.slice(-6)}`
+      : `${marketChain.address.slice(0, 10)}…${marketChain.address.slice(-6)}`);
+    slink.href = `${marketChain.base}/${onTx ? 'tx/' + it.listTxHash : 'address/' + marketChain.address}`;
+    slink.target = '_blank';
+    slink.rel = 'noopener';
+    slink.title = onTx ? 'Listing registered on 0G chain' : 'KeepMarket contract on 0G';
+    settle.appendChild(slink);
+    card.appendChild(settle);
+  }
 
   return card;
 }
@@ -1082,7 +1126,7 @@ sealSubmit.addEventListener('click', async () => {
         turnId: sealTurnId,
         title,
         teaser: sealTeaser.value.trim(),
-        priceLabel: sealPrice.value.trim(),
+        priceOg: sealPrice.value.trim(),
       }),
     });
     if (r.status === 401) {
