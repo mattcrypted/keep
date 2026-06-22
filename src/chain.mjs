@@ -33,13 +33,25 @@ export function contractAddress() {
   return _deploy?.address || null;
 }
 
+// Read tokenId + the trustless on-chain anchor time (block.timestamp at mint) for
+// an already-anchored root. Best-effort: returns nulls if the views revert.
+async function tokenInfo(c, rootHash) {
+  try {
+    const tokenId = (await c.tokenIdOfRoot(rootHash)).toString();
+    const anchoredAt = Number(await c.anchoredAt(tokenId));
+    return { tokenId, anchoredAt };
+  } catch {
+    return { tokenId: null, anchoredAt: null };
+  }
+}
+
 // Mint a memory to its owner + anchor its rootHash. Idempotent per rootHash.
 export async function mintMemory({ owner, rootHash, model, ts }) {
   const c = contract();
 
   const existing = await c.ownerOfRoot(rootHash);
   if (existing && existing !== ethers.ZeroAddress) {
-    return { alreadyMinted: true, owner: existing };
+    return { alreadyMinted: true, owner: existing, ...(await tokenInfo(c, rootHash)) };
   }
 
   let rc;
@@ -53,24 +65,28 @@ export async function mintMemory({ owner, rootHash, model, ts }) {
     // idempotent success case instead of surfacing a scary 502.
     const after = await c.ownerOfRoot(rootHash).catch(() => ethers.ZeroAddress);
     if (after && after !== ethers.ZeroAddress) {
-      return { alreadyMinted: true, owner: after };
+      return { alreadyMinted: true, owner: after, ...(await tokenInfo(c, rootHash)) };
     }
     throw err;
   }
 
+  // anchoredAt comes from the SAME event we already parse for tokenId — zero extra
+  // RPC. It is the block timestamp of the mint: a trustless "committed at" time.
   let tokenId = null;
+  let anchoredAt = null;
   for (const log of rc.logs) {
     try {
       const parsed = c.interface.parseLog(log);
       if (parsed && parsed.name === 'MemoryAnchored') {
         tokenId = parsed.args.tokenId.toString();
+        anchoredAt = Number(parsed.args.anchoredAt);
         break;
       }
     } catch {
       /* not our event */
     }
   }
-  return { alreadyMinted: false, owner, tokenId, txHash: rc.hash };
+  return { alreadyMinted: false, owner, tokenId, anchoredAt, txHash: rc.hash };
 }
 
 // Chain-sourced ownership for a memory: is this rootHash minted, and as which token
@@ -80,6 +96,5 @@ export async function mintStatusOf(rootHash) {
   const c = contract();
   const owner = await c.ownerOfRoot(rootHash);
   if (!owner || owner === ethers.ZeroAddress) return { minted: false };
-  const tokenId = (await c.tokenIdOfRoot(rootHash)).toString();
-  return { minted: true, owner, tokenId };
+  return { minted: true, owner, ...(await tokenInfo(c, rootHash)) };
 }

@@ -11,7 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '..', 'data');
+// The mutable index lives here; defaults to <repo>/data for local dev. In
+// production (e.g. Railway) point KEEP_DATA_DIR at a persistent volume so the
+// index survives redeploys — and so the volume never shadows the image's
+// read-only data/deploy.json (which chain.mjs still loads from <repo>/data).
+const DATA_DIR = process.env.KEEP_DATA_DIR || join(__dirname, '..', 'data');
 const FILE = join(DATA_DIR, 'index.json');
 
 let _index = {}; // { [sessionId]: [{ rootHash, ts, turnId }] }

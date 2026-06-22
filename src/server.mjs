@@ -426,7 +426,7 @@ app.post('/api/owned', rateLimit, async (req, res) => {
     roots.map(async (rh) => {
       try {
         const s = await mintStatusOf(rh);
-        if (s.minted) owned[rh] = { tokenId: s.tokenId, owner: s.owner };
+        if (s.minted) owned[rh] = { tokenId: s.tokenId, owner: s.owner, anchoredAt: s.anchoredAt };
       } catch {
         /* skip unreadable root */
       }

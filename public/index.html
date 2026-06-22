@@ -70,9 +70,18 @@
         <span class="pop-label">rootHash</span>
         <a class="pop-val mono" id="pop-root" target="_blank" rel="noopener"></a>
       </div>
+      <div class="pop-row" id="call-row">
+        <span class="pop-label">call</span>
+        <label class="pop-val pop-check"><input type="checkbox" id="call-toggle" /> mark as a call (prediction)</label>
+      </div>
+      <div class="pop-row" id="committed-row" hidden>
+        <span class="pop-label">proof</span>
+        <span class="pop-val" id="committed-val"></span>
+      </div>
       <div class="pop-actions">
         <button id="verify-btn">Verify on 0G</button>
         <button id="mint-btn">Mint as NFT ⬦</button>
+        <button id="share-btn" hidden>Share card ⬦</button>
       </div>
       <div class="pop-result">
         <span class="verify-result" id="verify-result"></span>

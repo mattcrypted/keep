@@ -30,6 +30,11 @@ const verifyBtn = document.getElementById('verify-btn');
 const verifyResult = document.getElementById('verify-result');
 const mintBtn = document.getElementById('mint-btn');
 const mintResult = document.getElementById('mint-result');
+// Track-2 sneak peek: "Call your shot" controls
+const callToggle = document.getElementById('call-toggle');
+const committedRow = document.getElementById('committed-row');
+const committedVal = document.getElementById('committed-val');
+const shareBtn = document.getElementById('share-btn');
 
 // Login modal
 const loginOverlay = document.getElementById('login-overlay');
@@ -131,13 +136,35 @@ function loadMinted() {
     return {};
   }
 }
-function rememberMint(turnId, tokenId, txHash) {
+function rememberMint(turnId, tokenId, txHash, anchoredAt) {
   const m = loadMinted();
-  m[turnId] = { tokenId, txHash };
+  m[turnId] = { tokenId, txHash, anchoredAt };
   localStorage.setItem(mintedKey(sessionId), JSON.stringify(m));
 }
 function mintOf(turnId) {
   return loadMinted()[turnId];
+}
+
+// ── "Call your shot" labels (Track-2 sneak peek) ────────
+// A "call" is just a memory the user flags as a prediction. The label is
+// client-only — it never enters the 0G record, the recordHash, or the chain —
+// so the store / verify / rehydrate / mint contract is byte-for-byte unchanged.
+const callKey = (id) => 'keep.call:' + id;
+function loadCalls() {
+  try {
+    return JSON.parse(localStorage.getItem(callKey(sessionId)) || '{}');
+  } catch {
+    return {};
+  }
+}
+function isCall(turnId) {
+  return !!loadCalls()[turnId];
+}
+function setCall(turnId, on) {
+  const m = loadCalls();
+  if (on) m[turnId] = { at: Date.now() };
+  else delete m[turnId];
+  localStorage.setItem(callKey(sessionId), JSON.stringify(m));
 }
 
 let toldCount = 0;
@@ -189,7 +216,10 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified } = {}) 
       if (data.rootHash) badge.dataset.rootHash = data.rootHash;
       badge.dataset.model = data.model || model || '';
       badge.dataset.ts = data.ts || ts || '';
-      if (state === 'stored') reflectOwned(badge);
+      if (state === 'stored') {
+        reflectOwned(badge);
+        reflectCall(badge);
+      }
     },
   };
   handle.set(status || 'pending', { rootHash, model, ts, verified });
@@ -215,7 +245,7 @@ async function decorateOwnership(roots) {
       const badge = thread.querySelector(`.badge[data-root-hash="${CSS.escape(rootHash)}"]`);
       if (!badge) continue;
       const turnId = badge.dataset.turnId;
-      if (turnId && !mintOf(turnId)) rememberMint(turnId, info.tokenId, info.txHash);
+      if (turnId && !mintOf(turnId)) rememberMint(turnId, info.tokenId, info.txHash, info.anchoredAt);
       reflectOwned(badge);
     }
   } catch {
@@ -234,6 +264,12 @@ function reflectOwned(badge) {
       badge.appendChild(own);
     }
   }
+}
+
+// Reflect the "call" label on a badge (Track-2). Visual only.
+function reflectCall(badge) {
+  if (!badge) return;
+  badge.classList.toggle('call', isCall(badge.dataset.turnId));
 }
 
 function addPlainAiMsg(text) {
@@ -306,6 +342,24 @@ function openPopover(badge) {
     mintBtn.disabled = status !== 'stored';
   }
 
+  // Track-2 "Call your shot": label toggle + trustless committed-at-block-time proof.
+  if (callToggle) {
+    callToggle.checked = isCall(turnId);
+    callToggle.dataset.turnId = turnId || '';
+  }
+  if (committedRow) {
+    if (minted && minted.anchoredAt) {
+      committedRow.hidden = false;
+      committedVal.textContent = 'committed at block-time ' + fmtTime(minted.anchoredAt * 1000);
+    } else {
+      committedRow.hidden = true;
+    }
+  }
+  if (shareBtn) {
+    shareBtn.hidden = !(minted && minted.anchoredAt);
+    shareBtn.dataset.turnId = turnId || '';
+  }
+
   const r = badge.getBoundingClientRect();
   popover.hidden = false;
   const top = Math.min(r.bottom + 8, window.innerHeight - popover.offsetHeight - 12);
@@ -373,7 +427,7 @@ mintBtn.addEventListener('click', async () => {
       return;
     }
     const tokenId = data.tokenId || (data.alreadyMinted ? '—' : '?');
-    rememberMint(turnId, tokenId, data.txHash);
+    rememberMint(turnId, tokenId, data.txHash, data.anchoredAt);
     mintResult.textContent = data.alreadyMinted ? 'already owned ⬦' : `minted ⬦ #${tokenId} — yours on 0G`;
     mintResult.className = 'mint-result ok';
     mintBtn.textContent = 'Owned ⬦';
@@ -386,6 +440,74 @@ mintBtn.addEventListener('click', async () => {
     mintBtn.disabled = false;
   }
 });
+
+// ── "Call your shot" toggle + shareable proof card (Track-2) ─────
+if (callToggle) {
+  callToggle.addEventListener('change', () => {
+    const tid = callToggle.dataset.turnId;
+    if (!tid) return;
+    setCall(tid, callToggle.checked);
+    reflectCall(thread.querySelector(`.badge[data-turn-id="${CSS.escape(tid)}"]`));
+  });
+}
+if (shareBtn) {
+  shareBtn.addEventListener('click', () => buildShareCard(shareBtn.dataset.turnId));
+}
+// An honest proof-of-foresight card: it proves WHEN the call was committed on a
+// trustless block time — never that it was right, nor which model wrote it.
+function buildShareCard(turnId) {
+  const minted = mintOf(turnId);
+  if (!minted || !minted.anchoredAt) return;
+  const when = fmtTime(minted.anchoredAt * 1000);
+  const W = 720;
+  const H = 360;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#0e1116';
+  x.fillRect(0, 0, W, H);
+  x.strokeStyle = '#1c7a63';
+  x.lineWidth = 2;
+  x.strokeRect(14, 14, W - 28, H - 28);
+  x.fillStyle = '#2dd4a7';
+  x.font = 'bold 30px system-ui, sans-serif';
+  x.fillText('◆ Keep — Call committed', 40, 72);
+  x.fillStyle = '#9aa7b4';
+  x.font = '15px system-ui, sans-serif';
+  x.fillText('Committed at block-time (0G Chain · trustless):', 40, 130);
+  x.fillStyle = '#e8edf2';
+  x.font = 'bold 22px system-ui, sans-serif';
+  x.fillText(when, 40, 166);
+  x.fillStyle = '#9aa7b4';
+  x.font = '14px ui-monospace, monospace';
+  x.fillText('Token #' + (minted.tokenId ?? '—'), 40, 214);
+  if (minted.txHash) x.fillText('tx ' + minted.txHash.slice(0, 34) + '…', 40, 238);
+  x.fillStyle = '#9aa7b4';
+  x.font = '13px system-ui, sans-serif';
+  x.fillText('Proof of WHEN this call was committed on-chain —', 40, 300);
+  x.fillText('not that it is correct, and not which model wrote it.', 40, 322);
+  cv.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'keep-call-' + (minted.tokenId || 'card') + '.png';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  navigator.clipboard
+    ?.writeText(
+      `Keep — call committed at block-time ${when} (0G Chain, trustless). ` +
+        `Token #${minted.tokenId ?? '—'}. Proof of WHEN it was committed — ` +
+        `not that it's correct, nor which model wrote it.`
+    )
+    .catch(() => {});
+  shareBtn.textContent = 'card saved ✓';
+  setTimeout(() => {
+    if (shareBtn) shareBtn.textContent = 'Share card ⬦';
+  }, 1800);
+}
 
 // ── Receipt polling ─────────────────────────────────────
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

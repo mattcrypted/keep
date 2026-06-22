@@ -237,6 +237,23 @@ a.pop-val:hover { text-decoration: underline; }
 .badge.owned { color: #c8b3ff; border-color: #6c5ce7; background: rgba(108, 92, 231, 0.12); }
 .badge .own { margin-left: 2px; }
 
+/* ── "Call your shot" (Track-2 sneak peek) ───────────── */
+.pop-actions { flex-wrap: wrap; }
+#call-row .pop-check { display: flex; gap: 6px; align-items: center; color: var(--ink-dim); cursor: pointer; }
+#committed-row .pop-val { color: var(--accent); font-weight: 600; }
+#share-btn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+.badge.call { border-color: var(--accent); }
+.badge.call .label::after { content: ' · 🎯 call'; }
+
 /* ── Login modal ─────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
