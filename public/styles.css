@@ -542,3 +542,121 @@ a.pop-val:hover { text-decoration: underline; }
 .listing-root:hover { text-decoration: underline; }
 .listing-vres.ok { color: var(--accent); }
 .listing-vres.bad { color: var(--bad); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Glow-up layer: depth, glass, and motion. Layered on top so it enhances the
+   base rules without touching them. Honors prefers-reduced-motion.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Ambient gradient backdrop for depth */
+body {
+  background:
+    radial-gradient(1100px 560px at 50% -12%, rgba(45, 212, 167, 0.10), transparent 60%),
+    radial-gradient(820px 480px at 108% 112%, rgba(47, 109, 246, 0.09), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Glass top bar that floats over the thread */
+.topbar {
+  background: rgba(18, 23, 30, 0.72);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mark { animation: floaty 6s ease-in-out infinite; }
+
+/* Pills: smooth, with a gentle lift on the interactive ones */
+.pill { transition: background .2s ease, border-color .2s ease, color .2s ease, transform .12s ease, box-shadow .2s ease; }
+.pill.action:hover, .pill.ident:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.30); }
+.pill.action:active, .pill.ident:active { transform: translateY(0); }
+
+/* Primary buttons: depth glow + press micro-interaction */
+#send, .modal-primary, .listing-btn {
+  transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+  box-shadow: 0 4px 14px rgba(45, 212, 167, 0.26);
+}
+#send:hover:not(:disabled), .modal-primary:hover:not(:disabled), .listing-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 9px 24px rgba(45, 212, 167, 0.40);
+}
+#send:active:not(:disabled), .modal-primary:active:not(:disabled), .listing-btn:active:not(:disabled) {
+  transform: translateY(0) scale(.99);
+}
+.gallery-back, .market-back, #verify-btn, #mint-btn, #share-btn {
+  transition: transform .12s ease, border-color .2s ease, background .2s ease;
+}
+.gallery-back:hover, .market-back:hover,
+#verify-btn:hover:not(:disabled), #mint-btn:hover:not(:disabled), #share-btn:hover { transform: translateY(-1px); }
+
+/* Inputs: soft focus glow */
+#input:focus, .modal input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45, 212, 167, 0.16);
+}
+
+/* Cards: hover lift. Entrance is handled by Motion (scroll-reveal with spring);
+   if Motion fails to load, cards simply appear, which is a fine fallback. */
+.listing-card, .nft-card {
+  transition: transform .18s cubic-bezier(.2, .7, .2, 1), box-shadow .18s ease, border-color .18s ease;
+}
+.listing-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--warn);
+  box-shadow: 0 16px 40px rgba(224, 160, 74, 0.18);
+}
+.nft-card:hover { transform: translateY(-4px); box-shadow: 0 16px 40px rgba(108, 92, 231, 0.24); }
+
+/* Sealed content shimmers until it is revealed */
+.sealed-body:not(.revealed) { background-size: 22px 22px; animation: shimmer 2.6s linear infinite; }
+
+/* Message entrance */
+.msg { animation: msgIn .28s ease both; }
+
+/* Modals + popover: glass and entrance */
+.modal-overlay {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fadeIn .18s ease both;
+}
+.modal {
+  background: rgba(26, 33, 43, 0.86);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  animation: modalIn .22s cubic-bezier(.2, .7, .2, 1) both;
+}
+.popover {
+  background: rgba(28, 35, 45, 0.92);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  animation: modalIn .16s ease both;
+}
+
+/* Polished scrollbars */
+.thread::-webkit-scrollbar, .gallery::-webkit-scrollbar, .market::-webkit-scrollbar { width: 11px; }
+.thread::-webkit-scrollbar-thumb, .gallery::-webkit-scrollbar-thumb, .market::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.thread::-webkit-scrollbar-thumb:hover,
+.gallery::-webkit-scrollbar-thumb:hover,
+.market::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+@keyframes cardIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes shimmer { from { background-position: 0 0; } to { background-position: 44px 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

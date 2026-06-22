@@ -3,6 +3,30 @@
 // device brings your memories back (from 0G) and your tokens with them. Anonymous
 // use still works (random id); signing in is what makes it portable + ownable.
 
+// Motion (the vanilla build of the Framer Motion engine), loaded as progressive
+// enhancement. Cards reveal on scroll with spring physics; if it fails to load, cards
+// simply appear, so nothing breaks. Vendored at /vendor/motion.js (no CDN at runtime).
+let MOTION = null;
+import('/vendor/motion.js').then((m) => { MOTION = m; }).catch(() => { MOTION = null; });
+
+function revealCards(root) {
+  if (!MOTION || !MOTION.inView || !MOTION.animate) return;
+  for (const card of root.querySelectorAll('.listing-card, .nft-card')) {
+    card.style.opacity = '0';
+    MOTION.inView(
+      card,
+      () => {
+        MOTION.animate(
+          card,
+          { opacity: [0, 1], y: [16, 0] },
+          { type: 'spring', stiffness: 240, damping: 26 }
+        );
+      },
+      { amount: 0.12 }
+    );
+  }
+}
+
 const LS_ANON = 'keep.anonId';
 const LS_IDENTITY = 'keep.identity'; // { email, address }
 const rootsKey = (id) => 'keep.roots:' + id;
@@ -334,10 +358,10 @@ function openPopover(badge) {
         : 'stored & verifiable on 0G'
       : status === 'error'
         ? 'persist failed'
-        : 'saving — 0G writes take ~10–15s';
-  popModel.textContent = badge.dataset.model || '—';
-  popTime.textContent = badge.dataset.ts ? fmtTime(Number(badge.dataset.ts)) : '—';
-  popRoot.textContent = rootHash || '—';
+        : 'saving, 0G writes take about 10 to 15s';
+  popModel.textContent = badge.dataset.model || 'n/a';
+  popTime.textContent = badge.dataset.ts ? fmtTime(Number(badge.dataset.ts)) : 'n/a';
+  popRoot.textContent = rootHash || 'n/a';
   const tx = txFor(rootHash);
   if (tx) popRoot.href = `https://storagescan-galileo.0g.ai/tx/${tx}`;
   else popRoot.removeAttribute('href');
@@ -353,7 +377,7 @@ function openPopover(badge) {
   if (minted) {
     mintBtn.textContent = 'Owned ⬦';
     mintBtn.disabled = true;
-    mintResult.textContent = `#${minted.tokenId} — yours on 0G`;
+    mintResult.textContent = `#${minted.tokenId}, yours on 0G`;
     mintResult.className = 'mint-result ok';
     if (minted.txHash) {
       const a = document.createElement('a');
@@ -420,10 +444,10 @@ verifyBtn.addEventListener('click', async () => {
     });
     const data = await res.json();
     if (data.ok) {
-      verifyResult.textContent = '✓ unaltered — re-fetched from 0G & re-hashed';
+      verifyResult.textContent = '✓ unaltered, re-fetched from 0G and re-hashed';
       verifyResult.className = 'verify-result ok';
     } else {
-      verifyResult.textContent = `✕ ${res.ok ? 'mismatch — record altered' : data.error || 'verify failed'}`;
+      verifyResult.textContent = `✕ ${res.ok ? 'mismatch, record altered' : data.error || 'verify failed'}`;
       verifyResult.className = 'verify-result bad';
     }
   } catch (err) {
@@ -458,9 +482,9 @@ mintBtn.addEventListener('click', async () => {
       mintBtn.disabled = false;
       return;
     }
-    const tokenId = data.tokenId || (data.alreadyMinted ? '—' : '?');
+    const tokenId = data.tokenId || (data.alreadyMinted ? 'n/a' : '?');
     rememberMint(turnId, tokenId, data.txHash, data.anchoredAt);
-    mintResult.textContent = data.alreadyMinted ? 'already owned ⬦' : `minted ⬦ #${tokenId} — yours on 0G`;
+    mintResult.textContent = data.alreadyMinted ? 'already owned ⬦' : `minted ⬦ #${tokenId}, yours on 0G`;
     mintResult.className = 'mint-result ok';
     mintBtn.textContent = 'Owned ⬦';
     // reflect on the badge
@@ -504,7 +528,7 @@ function buildShareCard(turnId) {
   x.strokeRect(14, 14, W - 28, H - 28);
   x.fillStyle = '#2dd4a7';
   x.font = 'bold 30px system-ui, sans-serif';
-  x.fillText('◆ Keep — Call committed', 40, 72);
+  x.fillText('◆ Keep: Call committed', 40, 72);
   x.fillStyle = '#9aa7b4';
   x.font = '15px system-ui, sans-serif';
   x.fillText('Committed at block-time (0G Chain · trustless):', 40, 130);
@@ -513,11 +537,11 @@ function buildShareCard(turnId) {
   x.fillText(when, 40, 166);
   x.fillStyle = '#9aa7b4';
   x.font = '14px ui-monospace, monospace';
-  x.fillText('Token #' + (minted.tokenId ?? '—'), 40, 214);
+  x.fillText('Token #' + (minted.tokenId ?? 'n/a'), 40, 214);
   if (minted.txHash) x.fillText('tx ' + minted.txHash.slice(0, 34) + '…', 40, 238);
   x.fillStyle = '#9aa7b4';
   x.font = '13px system-ui, sans-serif';
-  x.fillText('Proof of WHEN this call was committed on-chain —', 40, 300);
+  x.fillText('Proof of WHEN this call was committed on-chain', 40, 300);
   x.fillText('not that it is correct, and not which model wrote it.', 40, 322);
   cv.toBlob((blob) => {
     if (!blob) return;
@@ -530,8 +554,8 @@ function buildShareCard(turnId) {
   });
   navigator.clipboard
     ?.writeText(
-      `Keep — call committed at block-time ${when} (0G Chain, trustless). ` +
-        `Token #${minted.tokenId ?? '—'}. Proof of WHEN it was committed — ` +
+      `Keep, call committed at block-time ${when} (0G Chain, trustless). ` +
+        `Token #${minted.tokenId ?? 'n/a'}. Proof of WHEN it was committed: ` +
         `not that it's correct, nor which model wrote it.`
     )
     .catch(() => {});
@@ -718,7 +742,7 @@ loginVerify.addEventListener('click', async () => {
     switchIdentity();
   } catch (err) {
     loginMsg.textContent = /invalid|422|credential|expired/i.test(err.message)
-      ? "That code didn't match — it may be expired or already used. Tap “resend a fresh code” and enter the newest one."
+      ? "That code didn't match, it may be expired or already used. Tap “resend a fresh code” and enter the newest one."
       : err.message;
     loginMsg.className = 'modal-msg bad';
   } finally {
@@ -742,7 +766,7 @@ loginResend.addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'could not resend');
     loginCode.value = '';
     loginCode.focus();
-    loginMsg.textContent = `Fresh code sent to ${email} — enter the newest one.`;
+    loginMsg.textContent = `Fresh code sent to ${email}, enter the newest one.`;
     loginMsg.className = 'modal-msg info';
   } catch (err) {
     loginMsg.textContent = err.message;
@@ -774,14 +798,14 @@ async function updatePills() {
       pillOg.textContent = `0G ✓ ${Number(h.wallet.balance).toFixed(2)}`;
       pillOg.className = 'pill';
     } else if (h.wallet?.error) {
-      pillOg.textContent = '0G — RPC slow';
+      pillOg.textContent = '0G: RPC slow';
       pillOg.className = 'pill muted';
     } else {
       pillOg.textContent = '0G unfunded';
       pillOg.className = 'pill bad';
     }
   } catch {
-    pillOg.textContent = '0G — checking';
+    pillOg.textContent = '0G: checking';
     pillOg.className = 'pill muted';
   }
 }
@@ -821,7 +845,7 @@ function renderNftCard(it) {
   if (it.anchoredAt) {
     meta.appendChild(el('div', 'nft-committed', `committed at block-time ${fmtTime(it.anchoredAt * 1000)}`));
   }
-  meta.appendChild(el('div', null, `model · ${it.model || '—'}`));
+  meta.appendChild(el('div', null, `model · ${it.model || 'n/a'}`));
   if (it.rootHash) {
     meta.appendChild(el('div', 'nft-root', `${it.rootHash.slice(0, 10)}…${it.rootHash.slice(-6)}`));
   }
@@ -856,13 +880,14 @@ async function openGallery() {
     const items = data.items || [];
     if (!items.length) {
       galleryState.hidden = false;
-      galleryState.textContent = 'No memories owned yet — mint one from the chat and it’ll appear here as yours.';
+      galleryState.textContent = 'No memories owned yet. Mint one from the chat and it’ll appear here as yours.';
       gallerySub.textContent = '0 owned';
       return;
     }
     galleryState.hidden = true;
     gallerySub.textContent = `${items.length} memor${items.length === 1 ? 'y' : 'ies'} you own`;
     for (const it of items) galleryGrid.appendChild(renderNftCard(it));
+    revealCards(galleryGrid);
   } catch (err) {
     galleryState.hidden = false;
     galleryState.textContent = `✕ ${err.message}`;
@@ -890,7 +915,7 @@ async function openMarket() {
   marketGrid.replaceChildren();
   marketState.hidden = false;
   marketState.textContent = 'loading sealed listings from 0G…';
-  marketSub.textContent = 'encrypted memories, sealed on 0G — buy to decrypt';
+  marketSub.textContent = 'encrypted memories, sealed on 0G, buy to decrypt';
   purchasedSet = new Set();
   try {
     if (identity) {
@@ -911,13 +936,14 @@ async function openMarket() {
     const items = data.listings || [];
     if (!items.length) {
       marketState.hidden = false;
-      marketState.textContent = 'No sealed listings yet — seal one of your memories from its receipt to list it here.';
+      marketState.textContent = 'No sealed listings yet. Seal one of your memories from its receipt to list it here.';
       marketSub.textContent = '0 listings · the bazaar is open';
       return;
     }
     marketState.hidden = true;
     marketSub.textContent = `${items.length} sealed listing${items.length === 1 ? '' : 's'} · buy to decrypt`;
     for (const it of items) marketGrid.appendChild(renderListingCard(it));
+    revealCards(marketGrid);
   } catch (err) {
     marketState.hidden = false;
     marketState.textContent = `✕ ${err.message}`;
@@ -938,7 +964,7 @@ function renderListingCard(it) {
   card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}${it.model ? ' · ' + it.model : ''}`));
   if (it.teaser) card.appendChild(el('div', 'listing-teaser', `“${it.teaser}”`));
 
-  const body = el('div', 'sealed-body', '🔒 sealed — the full memory is encrypted on 0G');
+  const body = el('div', 'sealed-body', '🔒 sealed, the full memory is encrypted on 0G');
   card.appendChild(body);
 
   const actions = el('div', 'listing-actions');
@@ -965,7 +991,7 @@ function renderListingCard(it) {
       if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
       body.textContent = d.response || '(empty)';
       body.classList.add('revealed');
-      actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked — decrypted from 0G'));
+      actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked, decrypted from 0G'));
     } catch (e) {
       btn.disabled = false;
       btn.textContent = 'Reveal';
@@ -996,7 +1022,7 @@ function renderListingCard(it) {
       a.rel = 'noopener';
       note.appendChild(a);
     } else {
-      note.textContent = '✓ access recorded (locally — on-chain record pending)';
+      note.textContent = '✓ access recorded (locally, on-chain record pending)';
     }
   };
 
@@ -1020,7 +1046,7 @@ function renderListingCard(it) {
         return;
       }
       const d = await r.json().catch(() => ({}));
-      if (r.status === 402) throw new Error(`not enough OG — fund your wallet to pay ${it.priceLabel}`);
+      if (r.status === 402) throw new Error(`not enough OG, fund your wallet to pay ${it.priceLabel}`);
       if (!r.ok) throw new Error(d.error || 'purchase failed');
       onPurchased(d);
     } catch (e) {
@@ -1038,8 +1064,8 @@ function renderListingCard(it) {
     btn.textContent = buyLabel;
     btn.onclick = doBuy;
     note.textContent = priced
-      ? 'pay in OG — settles buyer → seller on 0G, unlocks the sealed memory'
-      : 'gas-free access record on 0G — unlocks real sealed content';
+      ? 'pay in OG, settles buyer → seller on 0G, unlocks the sealed memory'
+      : 'gas-free access record on 0G, unlocks real sealed content';
   }
   actions.appendChild(btn);
   if (note.textContent) actions.appendChild(note);
@@ -1203,8 +1229,8 @@ async function boot() {
   if (roots.length === 0) {
     addPlainAiMsg(
       identity
-        ? "You're signed in — anything you tell me is yours, remembered on 0G, and you can mint any memory you want to own. What's on your mind?"
-        : "Hi — I'm Keep. Anything you tell me gets written to 0G as a tamper-evident record you can verify, and I'll still remember it if you reload. Sign in (top right) to make your memories portable and ownable."
+        ? "You're signed in, anything you tell me is yours, remembered on 0G, and you can mint any memory you want to own. What's on your mind?"
+        : "Hi, I'm Keep. Anything you tell me gets written to 0G as a tamper-evident record you can verify, and I'll still remember it if you reload. Sign in (top right) to make your memories portable and ownable."
     );
     return;
   }
@@ -1221,7 +1247,7 @@ async function boot() {
       restoredText.textContent =
         res.status === 401
           ? 'Sign in again to rebuild your owned memories from 0G.'
-          : "couldn't restore from 0G — please reload.";
+          : "couldn't restore from 0G, please reload.";
       return;
     }
     const data = await res.json();
@@ -1240,10 +1266,10 @@ async function boot() {
     toldCount = data.recovered;
     updateMemCount();
     decorateOwnership(data.turns.map((t) => t.rootHash)); // chain-sourced owned badges
-    const verifiedNote = data.allVerified ? ' — all verified ✓' : '';
+    const verifiedNote = data.allVerified ? ', all verified ✓' : '';
     restoredText.textContent = data.serverHadSession
       ? `restored ${data.recovered} of ${data.requested} memories from 0G (re-fetched from the chain)${verifiedNote}`
-      : `rebuilt this conversation from 0G — the server held nothing. ${data.recovered} of ${data.requested} memories restored${verifiedNote}.`;
+      : `rebuilt this conversation from 0G, the server held nothing. ${data.recovered} of ${data.requested} memories restored${verifiedNote}.`;
     if (lastHandle) {
       lastHandle.badge.classList.add('attention');
       lastHandle.badge.addEventListener('animationend', () => lastHandle.badge.classList.remove('attention'), {
