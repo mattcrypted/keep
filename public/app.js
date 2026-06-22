@@ -10,20 +10,32 @@ let MOTION = null;
 import('/vendor/motion.js').then((m) => { MOTION = m; }).catch(() => { MOTION = null; });
 
 function revealCards(root) {
-  if (!MOTION || !MOTION.inView || !MOTION.animate) return;
+  if (!MOTION || !MOTION.inView || !MOTION.animate) return; // no Motion: cards stay visible
+  const show = (card) => {
+    card.style.opacity = '1';
+    card.style.transform = 'none';
+  };
   for (const card of root.querySelectorAll('.listing-card, .nft-card')) {
     card.style.opacity = '0';
-    MOTION.inView(
-      card,
-      () => {
-        MOTION.animate(
-          card,
-          { opacity: [0, 1], y: [16, 0] },
-          { type: 'spring', stiffness: 240, damping: 26 }
-        );
-      },
-      { amount: 0.12 }
-    );
+    // Failsafe: a card must never be left stuck hidden if Motion misbehaves.
+    const failsafe = setTimeout(() => show(card), 1500);
+    try {
+      MOTION.inView(
+        card,
+        () => {
+          clearTimeout(failsafe);
+          try {
+            MOTION.animate(card, { opacity: [0, 1], y: [16, 0] }, { type: 'spring', stiffness: 240, damping: 26 });
+          } catch {
+            show(card);
+          }
+        },
+        { amount: 0.12 }
+      );
+    } catch {
+      clearTimeout(failsafe);
+      show(card);
+    }
   }
 }
 
