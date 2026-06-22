@@ -276,11 +276,14 @@ const fmtTime = (ts) => new Date(ts).toLocaleString();
 function addUserMsg(text) {
   const msg = el('div', 'msg user');
   msg.appendChild(el('div', 'bubble', text));
+  const meta = el('div', 'meta'); // "Seal & list" gets attached here once the turn is stored
+  msg.appendChild(meta);
   thread.appendChild(msg);
   scroll();
+  return { meta, text };
 }
 
-function addAiMsg(text, { turnId, model, ts, rootHash, status, verified } = {}) {
+function addAiMsg(text, { turnId, model, ts, rootHash, status, verified, userHandle } = {}) {
   const msg = el('div', 'msg ai');
   msg.appendChild(el('div', 'bubble', text));
   const meta = el('div', 'meta');
@@ -307,6 +310,7 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified } = {}) 
         reflectOwned(badge);
         reflectCall(badge);
         renderReceiptActions(meta, badge.dataset.turnId);
+        if (userHandle) attachUserSeal(userHandle, badge.dataset.turnId);
       }
     },
   };
@@ -315,19 +319,63 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified } = {}) 
   return handle;
 }
 
-// Inline receipt actions, shown side by side next to the "on 0G" badge once the
-// memory is stored. The badge itself is the "verify on 0G" trigger (it opens the
-// details popup and verifies); these two are the quick actions beside it.
+// AI-side receipt action: "Share card" sits next to the "on 0G" badge once the
+// memory is stored. (The badge itself opens the details popup and verifies.)
+// "Seal & list" lives under YOUR message instead — see attachUserSeal.
 function renderReceiptActions(meta, turnId) {
   if (!turnId || meta.querySelector('.meta-action')) return; // render once
   const share = el('button', 'meta-action', 'Share card ⬦');
   share.title = 'Download a proof-of-foresight card (anchors the call on 0G if needed)';
   share.addEventListener('click', () => shareInline(turnId, share));
-  const seal = el('button', 'meta-action', 'Seal & list ⬦');
-  seal.title = 'Seal this memory (encrypt + list on 0G), and mark it as a prediction';
-  seal.addEventListener('click', () => openSeal(turnId));
   meta.appendChild(share);
-  meta.appendChild(seal);
+}
+
+// The most recent message you can seal — the target for the typed "seal and list".
+let lastSealable = null; // { turnId, text }
+
+// A short, public-safe headline suggestion from your message (NOT the teaser,
+// which would leak the sealed body).
+function sealTitleFrom(text) {
+  return (text || '').trim().split(/\s+/).slice(0, 8).join(' ').slice(0, 60);
+}
+
+// "Seal & list" on YOUR side of the chat: attached under your message once its
+// turn is stored on 0G, pre-filling a title from what you wrote.
+function attachUserSeal(userHandle, turnId) {
+  if (!userHandle || !userHandle.meta || !turnId) return;
+  lastSealable = { turnId, text: userHandle.text || '' };
+  if (userHandle.meta.querySelector('.meta-action')) return; // render once
+  const seal = el('button', 'meta-action', 'Seal & list ⬦');
+  seal.title = 'Seal this message (encrypt + list on 0G), and mark it as a prediction';
+  seal.addEventListener('click', () => openSeal(turnId, { title: sealTitleFrom(userHandle.text) }));
+  userHandle.meta.appendChild(seal);
+}
+
+// Recognize a typed "seal and list" instruction (an exact-phrase whitelist, so a
+// normal memory is never mistaken for a command).
+function isSealCommand(text) {
+  const s = text.trim().toLowerCase().replace(/[.!?\s]+$/g, '');
+  return [
+    'seal and list', 'seal & list', 'seal and list it', 'seal & list it',
+    'seal and list this', 'seal & list this', 'seal it', 'seal this',
+    'seal and sell', 'seal & sell', 'list it on the market', 'list this on the market',
+    'put it up for sale', 'put this up for sale',
+  ].includes(s);
+}
+
+// Handle the typed command: open the seal form pre-filled for your most recent
+// message, instead of sending the command to Keep as a normal message.
+function handleSealCommand() {
+  input.value = '';
+  if (!identity) {
+    openLogin('Sign in to seal & list your knowledge.');
+    return;
+  }
+  if (!lastSealable || !lastSealable.turnId) {
+    addPlainAiMsg('Send the knowledge you want to list as a message first, then say “seal and list” and I’ll open the listing form for it.');
+    return;
+  }
+  openSeal(lastSealable.turnId, { title: sealTitleFrom(lastSealable.text) });
 }
 
 // Decorate restored memories with CHAIN-SOURCED ownership, so "owned ⬦ #N" shows on
@@ -666,9 +714,15 @@ composer.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+  // A typed "seal and list" is an instruction, not a memory: open the seal form
+  // for your most recent message instead of sending it to Keep.
+  if (isSealCommand(text)) {
+    handleSealCommand();
+    return;
+  }
   input.value = '';
   sendBtn.disabled = true;
-  addUserMsg(text);
+  const userHandle = addUserMsg(text);
   const typing = addTyping();
   try {
     const res = await fetch('/api/chat', {
@@ -682,7 +736,8 @@ composer.addEventListener('submit', async (e) => {
       addPlainAiMsg(`⚠ ${data.error || 'something went wrong'}`);
       return;
     }
-    const handle = addAiMsg(data.reply, { turnId: data.turnId, model: data.model, ts: data.ts });
+    const handle = addAiMsg(data.reply, { turnId: data.turnId, model: data.model, ts: data.ts, userHandle });
+    lastSealable = { turnId: data.turnId, text }; // command can target it even before it's stored
     toldCount++;
     updateMemCount();
     pollReceipt(data.turnId, handle);
@@ -1411,7 +1466,7 @@ async function boot() {
     const data = await res.json();
     let lastHandle = null;
     for (const t of data.turns) {
-      addUserMsg(t.prompt);
+      const uh = addUserMsg(t.prompt);
       lastHandle = addAiMsg(t.response, {
         turnId: t.turnId,
         model: t.model,
@@ -1419,6 +1474,7 @@ async function boot() {
         rootHash: t.rootHash,
         verified: t.verified,
         status: 'stored',
+        userHandle: uh,
       });
     }
     toldCount = data.recovered;
