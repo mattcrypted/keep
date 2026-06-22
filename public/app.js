@@ -52,13 +52,14 @@ const memCount = document.getElementById('mem-count');
 const memSaving = document.getElementById('mem-saving');
 const proveBtn = document.getElementById('prove');
 const identityBtn = document.getElementById('identity');
-const galleryBtn = document.getElementById('gallery-btn');
+const navChat = document.getElementById('nav-chat');
+const galleryBtn = document.getElementById('nav-gallery');
 const gallery = document.getElementById('gallery');
 const galleryGrid = document.getElementById('gallery-grid');
 const gallerySub = document.getElementById('gallery-sub');
 const galleryState = document.getElementById('gallery-state');
 const galleryBack = document.getElementById('gallery-back');
-const marketBtn = document.getElementById('market-btn');
+const marketBtn = document.getElementById('nav-market');
 const market = document.getElementById('market');
 const marketGrid = document.getElementById('market-grid');
 const marketState = document.getElementById('market-state');
@@ -73,7 +74,6 @@ const sealPrice = document.getElementById('seal-price');
 const sealSubmit = document.getElementById('seal-submit');
 const sealMsg = document.getElementById('seal-msg');
 const pillOg = document.getElementById('pill-og');
-const pillLlm = document.getElementById('pill-llm');
 const restored = document.getElementById('restored');
 const restoredText = document.getElementById('restored-text');
 
@@ -533,25 +533,25 @@ function buildShareCard(turnId) {
   cv.width = W;
   cv.height = H;
   const x = cv.getContext('2d');
-  x.fillStyle = '#0e1116';
+  x.fillStyle = '#0a0807';
   x.fillRect(0, 0, W, H);
-  x.strokeStyle = '#1c7a63';
+  x.strokeStyle = '#ff4d00';
   x.lineWidth = 2;
   x.strokeRect(14, 14, W - 28, H - 28);
-  x.fillStyle = '#2dd4a7';
+  x.fillStyle = '#ff6a26';
   x.font = 'bold 30px system-ui, sans-serif';
   x.fillText('◆ Keep: Call committed', 40, 72);
-  x.fillStyle = '#9aa7b4';
+  x.fillStyle = '#9c938d';
   x.font = '15px system-ui, sans-serif';
   x.fillText('Committed at block-time (0G Chain · trustless):', 40, 130);
-  x.fillStyle = '#e8edf2';
+  x.fillStyle = '#f6f3f1';
   x.font = 'bold 22px system-ui, sans-serif';
   x.fillText(when, 40, 166);
-  x.fillStyle = '#9aa7b4';
+  x.fillStyle = '#9c938d';
   x.font = '14px ui-monospace, monospace';
   x.fillText('Token #' + (minted.tokenId ?? 'n/a'), 40, 214);
   if (minted.txHash) x.fillText('tx ' + minted.txHash.slice(0, 34) + '…', 40, 238);
-  x.fillStyle = '#9aa7b4';
+  x.fillStyle = '#9c938d';
   x.font = '13px system-ui, sans-serif';
   x.fillText('Proof of WHEN this call was committed on-chain', 40, 300);
   x.fillText('not that it is correct, and not which model wrote it.', 40, 322);
@@ -804,8 +804,6 @@ async function updatePills() {
     const h = await (await fetch('/api/health')).json();
     loginReady = !!h.loginReady;
     renderIdentity();
-    pillLlm.textContent = h.llmReady ? h.model : 'no LLM key';
-    pillLlm.className = 'pill ' + (h.llmReady ? '' : 'bad');
     if (h.ogReady && h.wallet?.balance != null) {
       pillOg.textContent = `0G ✓ ${Number(h.wallet.balance).toFixed(2)}`;
       pillOg.className = 'pill';
@@ -840,11 +838,21 @@ proveBtn.addEventListener('click', async () => {
 // ── Gallery: your private collection of owned memory NFTs ────────────────
 // Signed-in only. Chain-sourced (the server reads MemoryAnchored for your
 // address), content re-fetched from 0G. Its own full-section view, not a popover.
+// Reflect which of the three sections (chat / market / gallery) is active on the
+// centered nav, so only one tab is lit at a time.
+function setActiveSection(section) {
+  navChat.classList.toggle('active', section === 'chat');
+  marketBtn.classList.toggle('active', section === 'market');
+  galleryBtn.classList.toggle('active', section === 'gallery');
+}
+
 function showChatView() {
   gallery.hidden = true;
   market.hidden = true;
   thread.hidden = false;
   composer.hidden = false;
+  setActiveSection('chat');
+  updateMemCount(); // restore "prove it" visibility (it belongs to the chat section)
 }
 
 function renderNftCard(it) {
@@ -881,6 +889,8 @@ async function openGallery() {
   restored.hidden = true;
   market.hidden = true;
   gallery.hidden = false;
+  setActiveSection('gallery');
+  proveBtn.hidden = true; // "prove it" belongs to the chat section
   galleryGrid.replaceChildren();
   galleryState.hidden = false;
   galleryState.textContent = 'loading your collection from 0G…';
@@ -907,6 +917,7 @@ async function openGallery() {
   }
 }
 
+navChat.addEventListener('click', showChatView);
 galleryBtn.addEventListener('click', openGallery);
 galleryBack.addEventListener('click', showChatView);
 
@@ -924,6 +935,8 @@ async function openMarket() {
   restored.hidden = true;
   gallery.hidden = true;
   market.hidden = false;
+  setActiveSection('market');
+  proveBtn.hidden = true; // "prove it" belongs to the chat section
   marketGrid.replaceChildren();
   marketState.hidden = false;
   marketState.textContent = 'loading sealed listings from 0G…';
@@ -969,14 +982,22 @@ function renderListingCard(it) {
   const bought = purchasedSet.has(it.listingId);
 
   const card = el('div', 'listing-card');
-  const head = el('div', 'listing-head');
-  head.appendChild(el('div', 'listing-title', it.title || 'Untitled'));
-  if (it.priceLabel) head.appendChild(el('span', 'price-chip', it.priceLabel));
-  card.appendChild(head);
-  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}${it.model ? ' · ' + it.model : ''}`));
-  if (it.teaser) card.appendChild(el('div', 'listing-teaser', `“${it.teaser}”`));
 
-  const body = el('div', 'sealed-body', '🔒 sealed, the full memory is encrypted on 0G');
+  // Framer-style preview: the listing header sits in a white card on a blue panel.
+  const thumb = el('div', 'listing-thumb');
+  if (it.priceLabel) thumb.appendChild(el('span', 'price-chip', it.priceLabel));
+  const preview = el('div', 'listing-preview');
+  preview.appendChild(el('div', 'listing-title', it.title || 'Untitled'));
+  if (it.teaser) preview.appendChild(el('div', 'listing-teaser', `“${it.teaser}”`));
+  preview.appendChild(el('div', 'listing-locked', '🔒 sealed on 0G · buy to decrypt'));
+  thumb.appendChild(preview);
+  card.appendChild(thumb);
+
+  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}${it.model ? ' · ' + it.model : ''}`));
+
+  // The decrypted memory drops in here after purchase (hidden until then).
+  const body = el('div', 'sealed-body');
+  body.hidden = true;
   card.appendChild(body);
 
   const actions = el('div', 'listing-actions');
@@ -1000,6 +1021,7 @@ function renderListingCard(it) {
       }
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'unlock failed');
+      body.hidden = false;
       if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
       body.textContent = d.response || '(empty)';
       body.classList.add('revealed');

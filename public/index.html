@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Keep, an AI that remembers you, and can prove it</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -17,19 +22,25 @@
             <div class="tag">an AI that remembers you, and can prove it</div>
           </div>
         </div>
+
+        <!-- Three distinct sections, switched from one centered nav -->
+        <nav class="nav" id="nav">
+          <button class="nav-item active" id="nav-chat" data-section="chat" title="Chat with Keep, then prove it remembers from 0G">
+            Chat
+          </button>
+          <button class="nav-item" id="nav-market" data-section="market" title="Sealed Market, buy & sell encrypted memories">
+            Sealed Market
+          </button>
+          <button class="nav-item" id="nav-gallery" data-section="gallery" hidden title="Your private collection, every memory you own as an NFT">
+            Gallery
+          </button>
+        </nav>
+
         <div class="pills" id="pills">
-          <span class="pill" id="pill-mem" title="Things you've told Keep this session">
+          <span class="pill muted" id="pill-mem" title="Things you've told Keep this session">
             remembering <strong id="mem-count">0</strong><span id="mem-saving"></span>
           </span>
           <span class="pill muted" id="pill-og" title="0G storage wallet">0G…</span>
-          <span class="pill muted" id="pill-llm" title="Chat model">model…</span>
-          <button
-            class="pill action"
-            id="market-btn"
-            title="Sealed Market, buy & sell encrypted memories"
-          >
-            sealed market ⬦
-          </button>
           <button
             class="pill action"
             id="prove"
@@ -37,14 +48,6 @@
             title="Wipe the server's in-memory copy, then reload, memory can only come back from 0G"
           >
             prove it ⟲
-          </button>
-          <button
-            class="pill action"
-            id="gallery-btn"
-            hidden
-            title="Your private collection, every memory you own as an NFT"
-          >
-            your gallery ⬦
           </button>
           <button class="pill ident" id="identity" title="Your portable Keep identity">sign in</button>
         </div>
