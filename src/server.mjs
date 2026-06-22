@@ -22,7 +22,7 @@ import { ethers } from 'ethers';
 import { seal, open } from './seal.mjs';
 import * as market from './market-store.mjs';
 import { randomUUID } from 'node:crypto';
-import { sendEmailCode, verifyEmailCode, privyReady } from './privy.mjs';
+import { sendEmailCode, verifyEmailCode, privyReady, appSigningReady } from './privy.mjs';
 import {
   issueToken,
   setSessionCookie,
@@ -826,6 +826,9 @@ app.get('/api/health', async (_req, res) => {
     mintingReady: mintingReady(),
     contract: contractAddress(),
     loginReady: privyReady(),
+    marketReady: marketReady(),
+    market: marketAddress(),
+    appSigningReady: appSigningReady(), // buyer-funded payments enabled (Option B)
   });
 });
 
