@@ -52,6 +52,7 @@ const memCount = document.getElementById('mem-count');
 const memSaving = document.getElementById('mem-saving');
 const proveBtn = document.getElementById('prove');
 const identityBtn = document.getElementById('identity');
+const signoutBtn = document.getElementById('signout');
 const navChat = document.getElementById('nav-chat');
 const galleryBtn = document.getElementById('nav-gallery');
 const gallery = document.getElementById('gallery');
@@ -135,7 +136,7 @@ function renderIdentity() {
   if (identity) {
     identityBtn.textContent = shortAddr(identity.address);
     identityBtn.classList.add('ident');
-    identityBtn.title = `Signed in as ${identity.email}\n${identity.address}\nClick to copy address · Shift-click to sign out`;
+    identityBtn.title = `Signed in as ${identity.email}\n${identity.address}\nClick to copy address`;
   } else {
     identityBtn.textContent = loginReady ? 'sign in' : 'login off';
     identityBtn.classList.remove('ident');
@@ -145,6 +146,8 @@ function renderIdentity() {
   }
   // The gallery is private: only a signed-in identity owns memories to show.
   if (galleryBtn) galleryBtn.hidden = !identity;
+  // The sign-out control only makes sense while signed in.
+  if (signoutBtn) signoutBtn.hidden = !identity;
 }
 
 // ── Per-identity receipt index ──────────────────────────
@@ -654,27 +657,36 @@ async function copyIdentityAddress() {
   }, 1200);
 }
 
+// Sign out: clear the session cookie + local identity, fall back to the anon id,
+// and rebuild the view. Memories stay on 0G and return on the next sign-in.
+function signOut() {
+  if (!identity) return;
+  if (!confirm(`Sign out of ${identity.email}? (your memories stay safe on 0G and come back when you sign in again)`)) return;
+  fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); // clear the httpOnly cookie
+  localStorage.removeItem(LS_IDENTITY);
+  identity = null;
+  sessionId = anonId();
+  renderIdentity();
+  switchIdentity();
+}
+
 identityBtn.addEventListener('click', (e) => {
   if (!loginReady) return;
   if (!identity) {
     openLogin();
     return;
   }
-  // Shift-click signs out; a plain click copies the full address (it's truncated in the
-  // pill, so copy is the only way to get the whole thing — needed to fund / receive).
+  // Shift-click signs out (a shortcut); a plain click copies the full address (it's
+  // truncated in the pill, so copy is the only way to get the whole thing to fund / receive).
   if (e.shiftKey) {
-    if (confirm(`Sign out of ${identity.email}? (your memories stay safe on 0G and come back when you sign in again)`)) {
-      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); // clear the httpOnly cookie
-      localStorage.removeItem(LS_IDENTITY);
-      identity = null;
-      sessionId = anonId();
-      renderIdentity();
-      switchIdentity();
-    }
+    signOut();
     return;
   }
   copyIdentityAddress();
 });
+
+// Explicit sign-out control, shown only when signed in.
+if (signoutBtn) signoutBtn.addEventListener('click', signOut);
 
 function openLogin(hint) {
   loginStepEmail.hidden = false;

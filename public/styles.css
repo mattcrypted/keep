@@ -194,6 +194,22 @@ body {
 }
 .pill.ident:active { transform: translateY(0); }
 
+/* Explicit sign-out, shown only while signed in */
+.pill.signout {
+  font-family: var(--sans);
+  cursor: pointer;
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-dim);
+}
+.pill.signout:hover {
+  border-color: rgba(255, 93, 93, 0.55);
+  background: rgba(255, 93, 93, 0.12);
+  color: #ffb4b4;
+  transform: translateY(-1px);
+}
+.pill.signout:active { transform: translateY(0); }
+
 /* ── Thread ──────────────────────────────────────────── */
 .thread {
   flex: 1;
