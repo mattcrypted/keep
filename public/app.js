@@ -1029,7 +1029,7 @@ function renderListingCard(it) {
   thumb.appendChild(preview);
   card.appendChild(thumb);
 
-  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}${it.model ? ' · ' + it.model : ''}`));
+  card.appendChild(el('div', 'listing-by', `by ${it.sellerShort}${mine ? ' · you' : ''}`));
 
   // The decrypted memory drops in here after purchase (hidden until then).
   const body = el('div', 'sealed-body');
