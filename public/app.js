@@ -66,7 +66,6 @@ const marketGrid = document.getElementById('market-grid');
 const marketState = document.getElementById('market-state');
 const marketSub = document.getElementById('market-sub');
 const marketBack = document.getElementById('market-back');
-const sealBtn = document.getElementById('seal-btn');
 const sealOverlay = document.getElementById('seal-overlay');
 const sealClose = document.getElementById('seal-close');
 const sealTitle = document.getElementById('seal-title');
@@ -83,15 +82,12 @@ const popStatus = document.getElementById('pop-status');
 const popModel = document.getElementById('pop-model');
 const popTime = document.getElementById('pop-time');
 const popRoot = document.getElementById('pop-root');
-const verifyBtn = document.getElementById('verify-btn');
 const verifyResult = document.getElementById('verify-result');
 const mintBtn = document.getElementById('mint-btn');
 const mintResult = document.getElementById('mint-result');
-// Track-2 sneak peek: "Call your shot" controls
-const callToggle = document.getElementById('call-toggle');
+// Trustless committed-at-block-time proof row (filled once a call is anchored).
 const committedRow = document.getElementById('committed-row');
 const committedVal = document.getElementById('committed-val');
-const shareBtn = document.getElementById('share-btn');
 
 // Login modal
 const loginOverlay = document.getElementById('login-overlay');
@@ -280,12 +276,28 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified } = {}) 
       if (state === 'stored') {
         reflectOwned(badge);
         reflectCall(badge);
+        renderReceiptActions(meta, badge.dataset.turnId);
       }
     },
   };
   handle.set(status || 'pending', { rootHash, model, ts, verified });
   scroll();
   return handle;
+}
+
+// Inline receipt actions, shown side by side next to the "on 0G" badge once the
+// memory is stored. The badge itself is the "verify on 0G" trigger (it opens the
+// details popup and verifies); these two are the quick actions beside it.
+function renderReceiptActions(meta, turnId) {
+  if (!turnId || meta.querySelector('.meta-action')) return; // render once
+  const share = el('button', 'meta-action', 'Share card ⬦');
+  share.title = 'Download a proof-of-foresight card (anchors the call on 0G if needed)';
+  share.addEventListener('click', () => shareInline(turnId, share));
+  const seal = el('button', 'meta-action', 'Seal & list ⬦');
+  seal.title = 'Seal this memory (encrypt + list on 0G), and mark it as a prediction';
+  seal.addEventListener('click', () => openSeal(turnId));
+  meta.appendChild(share);
+  meta.appendChild(seal);
 }
 
 // Decorate restored memories with CHAIN-SOURCED ownership, so "owned ⬦ #N" shows on
@@ -383,8 +395,6 @@ function openPopover(badge) {
 
   verifyResult.textContent = '';
   verifyResult.className = 'verify-result';
-  verifyBtn.disabled = status !== 'stored';
-  verifyBtn.dataset.rootHash = rootHash;
 
   mintResult.textContent = '';
   mintResult.className = 'mint-result';
@@ -408,11 +418,7 @@ function openPopover(badge) {
     mintBtn.disabled = status !== 'stored';
   }
 
-  // Track-2 "Call your shot": label toggle + trustless committed-at-block-time proof.
-  if (callToggle) {
-    callToggle.checked = isCall(turnId);
-    callToggle.dataset.turnId = turnId || '';
-  }
+  // Trustless committed-at-block-time proof (shown once the call is anchored via mint).
   if (committedRow) {
     if (minted && minted.anchoredAt) {
       committedRow.hidden = false;
@@ -421,15 +427,6 @@ function openPopover(badge) {
       committedRow.hidden = true;
     }
   }
-  if (shareBtn) {
-    shareBtn.hidden = !(minted && minted.anchoredAt);
-    shareBtn.dataset.turnId = turnId || '';
-  }
-  // Seal & list this memory in the market (available once it's stored on 0G).
-  if (sealBtn) {
-    sealBtn.hidden = status !== 'stored';
-    sealBtn.dataset.turnId = turnId || '';
-  }
 
   const r = badge.getBoundingClientRect();
   popover.hidden = false;
@@ -437,6 +434,9 @@ function openPopover(badge) {
   const left = Math.min(r.left, window.innerWidth - popover.offsetWidth - 12);
   popover.style.top = `${Math.max(12, top)}px`;
   popover.style.left = `${Math.max(12, left)}px`;
+
+  // Clicking the "on 0G" badge IS "verify on 0G": show the details, then verify.
+  if (status === 'stored' && rootHash) runVerify(rootHash);
 }
 
 document.addEventListener('click', (e) => {
@@ -445,11 +445,11 @@ document.addEventListener('click', (e) => {
   }
 });
 
-verifyBtn.addEventListener('click', async () => {
-  const rootHash = verifyBtn.dataset.rootHash;
+// Re-fetch the record from 0G and re-hash it to prove it is unaltered. Runs
+// automatically when the receipt popup opens (the badge is the verify trigger).
+async function runVerify(rootHash) {
   if (!rootHash) return;
-  verifyBtn.disabled = true;
-  verifyResult.textContent = 'checking 0G…';
+  verifyResult.textContent = 'verifying on 0G…';
   verifyResult.className = 'verify-result';
   try {
     const res = await fetch('/api/verify', {
@@ -468,10 +468,8 @@ verifyBtn.addEventListener('click', async () => {
   } catch (err) {
     verifyResult.textContent = `✕ ${err.message}`;
     verifyResult.className = 'verify-result bad';
-  } finally {
-    verifyBtn.disabled = false;
   }
-});
+}
 
 mintBtn.addEventListener('click', async () => {
   const turnId = mintBtn.dataset.turnId;
@@ -512,18 +510,48 @@ mintBtn.addEventListener('click', async () => {
   }
 });
 
-// ── "Call your shot" toggle + shareable proof card (Track-2) ─────
-if (callToggle) {
-  callToggle.addEventListener('change', () => {
-    const tid = callToggle.dataset.turnId;
-    if (!tid) return;
-    setCall(tid, callToggle.checked);
-    reflectCall(thread.querySelector(`.badge[data-turn-id="${CSS.escape(tid)}"]`));
-  });
+// ── Shareable proof-of-foresight card ───────────────────
+// "Share card" anchors the call on 0G if it isn't already (a gas-free mint, which
+// stamps a trustless block-time), then downloads the proof card. Sealing already
+// marks a memory as a prediction, so there is no separate "mark as call" control.
+async function shareInline(turnId, btn) {
+  if (!identity) {
+    openLogin('Sign in to create a shareable proof card.');
+    return;
+  }
+  let m = mintOf(turnId);
+  if (!m || m.anchoredAt == null) {
+    if (btn) { btn.disabled = true; btn.textContent = 'anchoring on 0G…'; }
+    try {
+      const res = await fetch('/api/mint', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, turnId, owner: identity.address }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'could not anchor on 0G');
+      rememberMint(turnId, data.tokenId || 'n/a', data.txHash, data.anchoredAt);
+      const badge = thread.querySelector(`.badge[data-turn-id="${CSS.escape(turnId)}"]`);
+      if (badge) reflectOwned(badge);
+      m = mintOf(turnId);
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Share card ⬦'; }
+      alert('Could not anchor this memory on 0G: ' + e.message);
+      return;
+    }
+  }
+  if (btn) btn.disabled = false;
+  if (!m || m.anchoredAt == null) {
+    if (btn) btn.textContent = 'Share card ⬦';
+    return;
+  }
+  buildShareCard(turnId);
+  if (btn) {
+    btn.textContent = 'card saved ✓';
+    setTimeout(() => { btn.textContent = 'Share card ⬦'; }, 1800);
+  }
 }
-if (shareBtn) {
-  shareBtn.addEventListener('click', () => buildShareCard(shareBtn.dataset.turnId));
-}
+
 // An honest proof-of-foresight card: it proves WHEN the call was committed on a
 // trustless block time — never that it was right, nor which model wrote it.
 function buildShareCard(turnId) {
@@ -574,10 +602,6 @@ function buildShareCard(turnId) {
         `not that it's correct, nor which model wrote it.`
     )
     .catch(() => {});
-  shareBtn.textContent = 'card saved ✓';
-  setTimeout(() => {
-    if (shareBtn) shareBtn.textContent = 'Share card ⬦';
-  }, 1800);
 }
 
 // ── Receipt polling ─────────────────────────────────────
@@ -1229,7 +1253,12 @@ sealSubmit.addEventListener('click', async () => {
     }
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'could not seal');
-    sealMsg.textContent = '✓ sealed & listed in the market';
+    // Sealing marks the memory as a prediction (no separate "mark as call" control).
+    if (sealTurnId) {
+      setCall(sealTurnId, true);
+      reflectCall(thread.querySelector(`.badge[data-turn-id="${CSS.escape(sealTurnId)}"]`));
+    }
+    sealMsg.textContent = '✓ sealed & listed, marked as a prediction';
     sealMsg.className = 'modal-msg ok';
     setTimeout(closeSeal, 950);
   } catch (e) {
@@ -1238,7 +1267,6 @@ sealSubmit.addEventListener('click', async () => {
     sealSubmit.disabled = false;
   }
 });
-sealBtn.addEventListener('click', () => openSeal(sealBtn.dataset.turnId));
 
 // Recover rootHashes the browser never captured by merging the server index.
 async function mergeServerRoots() {

@@ -248,7 +248,29 @@ body {
   -webkit-backdrop-filter: blur(6px);
 }
 
-.meta { margin-top: 5px; font-size: 11px; color: var(--ink-dim); display: flex; gap: 8px; align-items: center; }
+.meta { margin-top: 5px; font-size: 11px; color: var(--ink-dim); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Inline receipt actions, side by side next to the "on 0G" badge */
+.meta-action {
+  font-family: var(--sans);
+  font-size: 11px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-dim);
+  white-space: nowrap;
+  transition: border-color .2s ease, background .2s ease, color .2s ease, transform .12s ease;
+}
+.meta-action:hover {
+  border-color: rgba(255, 77, 0, 0.5);
+  background: rgba(255, 77, 0, 0.08);
+  color: var(--accent-2);
+  transform: translateY(-1px);
+}
+.meta-action:active { transform: translateY(0); }
+.meta-action:disabled { opacity: 0.6; cursor: default; transform: none; }
 
 /* Receipt badge under each AI message */
 .badge {
