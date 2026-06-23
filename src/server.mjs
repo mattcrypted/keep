@@ -21,7 +21,7 @@ import {
 import { ethers } from 'ethers';
 import { seal, open } from './seal.mjs';
 import * as market from './market-store.mjs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { sendEmailCode, verifyEmailCode, privyReady, appSigningReady } from './privy.mjs';
 import {
   issueToken,
@@ -244,7 +244,9 @@ app.post('/api/verify', async (req, res) => {
       ok: contentAddressOk && innerHashOk,
       contentAddressOk, // bytes still hash to this rootHash (unaltered on 0G)
       innerHashOk, // prompt+response+model+ts still matches the stamped hash
-      record,
+      // The record body is intentionally NOT returned. /api/verify is unauthenticated, so
+      // echoing prompt+response would let anyone holding a rootHash read the plaintext.
+      // The proof (the two booleans) is all the receipt UI needs.
       rootHash,
       rederivedRoot,
     });
@@ -543,10 +545,15 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
     return res.status(404).json({ error: 'memory not found or not yet stored on 0G' });
   }
 
-  // Dedupe: if this seller already listed this exact memory, return that listing instead
-  // of re-sealing + paying for another 0G upload + another list() tx (anti-spam, idempotent).
+  // Dedupe is keyed on the SEALED INPUTS, not just the source memory. Re-sealing the same
+  // memory with new notes/price/scope/title/teaser must create a NEW listing, not silently
+  // return the old one (which used to drop the seller's edits). A byte-identical re-seal
+  // stays an idempotent no-op, so we don't pay for a second 0G upload + list() tx.
+  const sealFingerprint = createHash('sha256')
+    .update([scope, priceWei.toString(), title, teaser, notes].join(' '))
+    .digest('hex');
   const dup = market.findBySource(owner, sourceRootHash);
-  if (dup) return res.json(market.toPublic(dup));
+  if (dup && dup.sealFingerprint === sealFingerprint) return res.json(market.toPublic(dup));
 
   try {
     // Pull the plaintext memory from 0G, seal it, store the ciphertext as a NEW 0G
@@ -572,6 +579,7 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
       title,
       teaser,
       scope, // 'user' (seller's knowledge only) | 'full' (whole exchange)
+      sealFingerprint, // identifies a byte-identical re-seal so a seller's edits aren't dropped
       priceLabel: effectiveLabel,
       priceWei: priceWei.toString(), // internal — never in toPublic; the buy() rail enforces it
       model: record.model || MODEL,
@@ -749,7 +757,6 @@ app.post('/api/market/unlock', rateLimit, async (req, res) => {
       response: body.response, // undefined for 'user'-scope listings
       model: body.model,
       ts: body.ts,
-      sourceRootHash: listing.sourceRootHash,
       cipherRootHash: listing.cipherRootHash,
     });
   } catch (err) {
@@ -848,6 +855,29 @@ app.get('/api/health', async (_req, res) => {
     market: marketAddress(),
     appSigningReady: appSigningReady(), // buyer-funded payments enabled (Option B)
   });
+});
+
+// ── Last-resort safety net. This error-handling middleware MUST come after every
+// route: it turns a thrown/rejected handler or a malformed/oversized body into a
+// clean JSON response instead of a default HTML error page. The process-level
+// handlers below keep the single demo process alive if a stray background promise
+// (e.g. a fire-and-forget 0G write) rejects, rather than letting Node exit.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const badBody =
+    err?.type === 'entity.parse.failed' ||
+    err?.type === 'entity.too.large' ||
+    err?.status === 400 ||
+    err?.statusCode === 400;
+  if (!badBody) console.error('[server] unhandled route error:', err?.stack || err?.message || err);
+  res.status(badBody ? 400 : 500).json({ error: badBody ? 'bad request' : 'something went wrong' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection (kept alive):', reason?.stack || reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException (kept alive):', err?.stack || err?.message || err);
 });
 
 const PORT = process.env.PORT || 3000;

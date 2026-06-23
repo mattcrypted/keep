@@ -752,7 +752,7 @@ a.pop-val:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 .listing-by { font-size: 11px; color: var(--ink-dim); padding: 0 2px; }
-.listing-prompt { font-size: 12px; color: var(--ink-dim); font-style: italic; }
+.listing-prompt { font-size: 12px; color: var(--ink-dim); font-style: italic; overflow-wrap: anywhere; word-break: break-word; }
 .sealed-body {
   font-size: 12.5px;
   color: var(--ink-dim);
@@ -760,6 +760,10 @@ a.pop-val:hover { text-decoration: underline; }
   border: 1px dashed var(--line);
   border-radius: 12px;
   padding: 12px;
+  /* Break long unbroken strings so revealed content never runs off the card. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background-size: 22px 22px;
   animation: shimmer 2.6s linear infinite;
   transition: filter 0.5s ease, color 0.5s ease, background 0.5s ease;

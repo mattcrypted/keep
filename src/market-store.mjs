@@ -58,7 +58,10 @@ export function toPublic(l) {
     sealedAt: l.sealedAt,
     createdAt: l.createdAt,
     cipherRootHash: l.cipherRootHash,
-    sourceRootHash: l.sourceRootHash,
+    // sourceRootHash is deliberately OMITTED here: it addresses the seller's ORIGINAL
+    // plaintext memory on 0G, so publishing it let anyone read a no-notes listing's
+    // content for free (fetch that root, it is the unsealed message). Buyers get the
+    // content they paid for through the unlock gate, not from a public pointer.
     listTxHash: l.listTxHash || null, // on-chain provenance of the listing (public)
   };
 }

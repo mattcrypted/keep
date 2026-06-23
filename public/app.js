@@ -1110,7 +1110,15 @@ async function openMarket() {
     }
     marketState.hidden = true;
     marketSub.textContent = `${items.length} sealed listing${items.length === 1 ? '' : 's'} · buy to decrypt`;
-    for (const it of items) marketGrid.appendChild(renderListingCard(it));
+    for (const it of items) {
+      // One malformed/legacy listing must not abort the whole grid (that made
+      // listings appear to "vanish"). Render each card in isolation; skip+log a bad one.
+      try {
+        marketGrid.appendChild(renderListingCard(it));
+      } catch (cardErr) {
+        console.warn('skipped a listing that failed to render:', it?.listingId, cardErr);
+      }
+    }
     revealCards(marketGrid);
   } catch (err) {
     marketState.hidden = false;
