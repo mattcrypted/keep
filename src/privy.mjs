@@ -8,7 +8,7 @@ import 'dotenv/config';
 import { PrivyClient } from '@privy-io/node';
 import { createViemAccount } from '@privy-io/node/viem';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -67,7 +67,9 @@ export async function appQuorumId() {
   _quorumId = quorum.id;
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(QUORUM_FILE, JSON.stringify({ publicKey: pub, quorumId: _quorumId }));
+    const tmp = `${QUORUM_FILE}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ publicKey: pub, quorumId: _quorumId }));
+    renameSync(tmp, QUORUM_FILE); // atomic swap
   } catch (err) {
     console.error('[privy] could not persist quorum id (will recreate next boot):', err.message);
   }

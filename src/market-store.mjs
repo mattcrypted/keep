@@ -6,7 +6,7 @@
 // touches `listings`, so a symmetric key or a purchase grant can never be
 // serialized into a browse response, even if the listing shape changes. toPublic()
 // whitelists fields one-by-one (it NEVER spreads a listing) for the same reason.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -26,14 +26,21 @@ try {
     };
   }
 } catch (err) {
-  console.error('[market] load failed, starting empty:', err.message);
+  // Move the corrupt file aside instead of letting the next persist() overwrite it: the keys
+  // map is the ONLY copy of every listing's symmetric key, so silent loss is unrecoverable.
+  try { renameSync(FILE, `${FILE}.corrupt-${Date.now()}`); } catch { /* best effort */ }
+  console.error('[market] load failed, moved corrupt file aside, starting empty:', err.message);
   _state = { listings: {}, keys: {}, grants: {}, names: {} };
 }
 
 function persist() {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(FILE, JSON.stringify(_state));
+    // Atomic write (temp + rename) so a crash mid-write can't truncate market.json and take
+    // the irreplaceable symmetric keys down with it.
+    const tmp = `${FILE}.tmp`;
+    writeFileSync(tmp, JSON.stringify(_state));
+    renameSync(tmp, FILE);
   } catch (err) {
     console.error('[market] write failed:', err.message);
   }
