@@ -99,6 +99,7 @@ const sealTitle = document.getElementById('seal-title');
 const sealTeaser = document.getElementById('seal-teaser');
 const sealPrice = document.getElementById('seal-price');
 const sealName = document.getElementById('seal-name');
+const sealNotes = document.getElementById('seal-notes');
 const sealScope = document.getElementById('seal-scope');
 const sealSubmit = document.getElementById('seal-submit');
 const sealMsg = document.getElementById('seal-msg');
@@ -347,7 +348,7 @@ function attachUserSeal(userHandle, turnId) {
   if (userHandle.meta.querySelector('.meta-action')) return; // render once
   const seal = el('button', 'meta-action', 'Seal & list ⬦');
   seal.title = 'Seal this message (encrypt + list on 0G), and mark it as a prediction';
-  seal.addEventListener('click', () => openSeal(turnId, { title: sealTitleFrom(userHandle.text) }));
+  seal.addEventListener('click', () => openSeal(turnId, { title: sealTitleFrom(userHandle.text), notes: userHandle.text || '' }));
   userHandle.meta.appendChild(seal);
 }
 
@@ -375,7 +376,7 @@ function handleSealCommand() {
     addPlainAiMsg('Send the knowledge you want to list as a message first, then say “seal and list” and I’ll open the listing form for it.');
     return;
   }
-  openSeal(lastSealable.turnId, { title: sealTitleFrom(lastSealable.text) });
+  openSeal(lastSealable.turnId, { title: sealTitleFrom(lastSealable.text), notes: lastSealable.text || '' });
 }
 
 // Decorate restored memories with CHAIN-SOURCED ownership, so "owned ⬦ #N" shows on
@@ -1343,6 +1344,7 @@ function openSeal(turnId, prefill = {}) {
   popover.hidden = true;
   sealTitle.value = prefill.title || '';
   sealTeaser.value = prefill.teaser || '';
+  if (sealNotes) sealNotes.value = prefill.notes || ''; // the detailed content, editable
   sealPrice.value = '';
   if (sealName) sealName.value = localStorage.getItem(LS_NAME) || '';
   setSealScope('user'); // default to "just my message" (your knowledge)
@@ -1383,6 +1385,7 @@ sealSubmit.addEventListener('click', async () => {
         priceOg: sealPrice.value.trim(),
         scope: sealScopeVal,
         sellerName,
+        notes: sealNotes ? sealNotes.value.trim() : '',
       }),
     });
     if (r.status === 401) {

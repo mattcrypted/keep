@@ -455,6 +455,8 @@ a.pop-val:hover { text-decoration: underline; }
   backdrop-filter: blur(24px) saturate(150%);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   animation: modalIn .22s cubic-bezier(.2, .7, .2, 1) both;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
 }
 .modal-close {
   position: absolute;
@@ -490,6 +492,25 @@ a.pop-val:hover { text-decoration: underline; }
   transition: border-color .2s ease, box-shadow .2s ease;
 }
 .modal input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.16); }
+
+/* The detailed sealed content box — large, for a full writeup */
+.seal-notes {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-size: 14px;
+  font-family: var(--chat);
+  line-height: 1.55;
+  outline: none;
+  margin-bottom: 10px;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.seal-notes:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.16); }
 .modal-primary { width: 100%; padding: 12px; font-size: 14px; }
 .modal-link {
   display: block;

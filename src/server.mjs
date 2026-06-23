@@ -523,6 +523,10 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
   // this scope. Absent/unknown scope falls back to 'full' for backward compatibility.
   const scope = req.body?.scope === 'user' ? 'user' : 'full';
 
+  // Optional detailed paid content the seller writes in the seal form. When present
+  // it IS the sealed body buyers unlock; otherwise we fall back to the source message.
+  const notes = capStr(req.body?.notes, 8000);
+
   // Resolve the source memory's rootHash + ts — live session first, durable index
   // fallback (same resolution as /api/mint).
   let sourceRootHash;
@@ -548,12 +552,13 @@ app.post('/api/market/seal', rateLimit, async (req, res) => {
     // Pull the plaintext memory from 0G, seal it, store the ciphertext as a NEW 0G
     // record (the original memory/rootHash/NFT are read-only and untouched).
     const { record } = await getRecord(sourceRootHash);
-    // 'user' scope seals only the seller's own message (no Claude reply, no model);
-    // 'full' scope seals the whole exchange. The ciphertext on 0G holds exactly this.
+    // The seller's content is their detailed notes if they wrote any, else the source
+    // message. 'user' scope seals just that; 'full' scope adds Claude's reply + model.
+    const userContent = notes || record.prompt;
     const plaintext = JSON.stringify(
       scope === 'user'
-        ? { prompt: record.prompt, ts: record.ts }
-        : { prompt: record.prompt, response: record.response, model: record.model, ts: record.ts }
+        ? { prompt: userContent, ts: record.ts }
+        : { prompt: userContent, response: record.response, model: record.model, ts: record.ts }
     );
     const { envelope, keyB64 } = seal(plaintext, record.model || MODEL);
     const { rootHash: cipherRootHash, txHash: sealTxHash } = await persistWithRetry(envelope);
