@@ -85,22 +85,23 @@ console.log('\n  self-test…');
 const id = (s) => ethers.keccak256(ethers.toUtf8Bytes(s));
 const seller = ethers.Wallet.createRandom().address;
 const recordBuyer = ethers.Wallet.createRandom().address;
-const listingId = id('selftest-' + deployTx.hash.slice(2, 12));
+const freeListingId = id('selftest-free-' + deployTx.hash.slice(2, 12));
+const pricedListingId = id('selftest-priced-' + deployTx.hash.slice(2, 12));
 const price = ethers.parseEther('0.0002');
 
-await (await contract.list(listingId, seller, price)).wait();
-ok('list() registered a listing');
+// Relayer rail is FREE-only now: list a free listing, record a purchase (no value moves).
+await (await contract.list(freeListingId, seller, 0n)).wait();
+await (await contract.recordPurchase(freeListingId, recordBuyer)).wait();
+const recordedOk = await contract.hasPurchased(freeListingId, recordBuyer);
+recordedOk ? ok('recordPurchase() on a FREE listing → hasPurchased == true') : bad('recordPurchase did not record');
 
-// Relayer rail: record a purchase with no value, assert the on-chain access fact.
-await (await contract.recordPurchase(listingId, recordBuyer)).wait();
-const recordedOk = await contract.hasPurchased(listingId, recordBuyer);
-recordedOk ? ok('recordPurchase() → hasPurchased == true') : bad('recordPurchase did not record');
-
-// Buyer-funded rail: deployer buys with value, assert access + seller proceeds credited.
-await (await contract.buy(listingId, { value: price })).wait();
-const boughtOk = await contract.hasPurchased(listingId, signer.address);
+// Buyer-funded rail: list a PRICED listing; deployer buys at the committed expectedPrice.
+await (await contract.list(pricedListingId, seller, price)).wait();
+ok('list() registered a free + a priced listing');
+await (await contract.buy(pricedListingId, price, { value: price })).wait();
+const boughtOk = await contract.hasPurchased(pricedListingId, signer.address);
 const owed = await contract.pendingWithdrawals(seller);
-boughtOk ? ok('buy() → hasPurchased == true') : bad('buy did not record');
+boughtOk ? ok('buy(expectedPrice) → hasPurchased == true') : bad('buy did not record');
 owed === price ? ok(`pendingWithdrawals[seller] == ${ethers.formatEther(owed)} 0G (pull-payment credited)`)
                : bad(`seller proceeds wrong: ${ethers.formatEther(owed)} 0G`);
 

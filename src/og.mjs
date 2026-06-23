@@ -71,8 +71,14 @@ export async function putRecord(record) {
 export async function getRecord(rootHash) {
   const [blob, dlErr] = await indexer().downloadToBlob(rootHash, { proof: true });
   if (dlErr) throw dlErr;
-  const text = await blob.text();
-  return { record: JSON.parse(text), bytes: new Uint8Array(await blob.arrayBuffer()) };
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Enforce content-addressing on the READ path: the bytes the indexer returned MUST hash
+  // back to the rootHash we asked for, or we refuse to trust them. Without this a malicious
+  // or buggy indexer could swap a record's bytes and every caller would believe it (the
+  // sealed path is saved by GCM, but gallery/rehydrate/verify read plaintext records).
+  const derived = await rootHashOf(bytes);
+  if (derived !== rootHash) throw new Error(`content at ${rootHash} does not match its address`);
+  return { record: JSON.parse(new TextDecoder().decode(bytes)), bytes };
 }
 
 // Re-derive the rootHash from raw bytes (proves content-addressing held).

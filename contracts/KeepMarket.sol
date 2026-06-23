@@ -71,15 +71,18 @@ contract KeepMarket is Ownable, ReentrancyGuard {
     /// @notice Buyer-FUNDED purchase: the caller pays native OG and the full amount is
     /// credited to the seller (pull-payment — the seller later withdraw()s). Permissionless.
     /// The buyer's own transaction binds payment + access record together (no relayer trust).
-    function buy(bytes32 listingId) external payable nonReentrant {
+    function buy(bytes32 listingId, uint256 expectedPrice) external payable nonReentrant {
         Listing memory l = listings[listingId];
         require(l.exists, "no listing");
         require(msg.sender != l.seller, "seller cannot buy");
         // Idempotent: an address that already has access (via buy() OR a relayed
         // recordPurchase) cannot be charged again — kills double-charge across rails.
         require(!purchased[listingId][msg.sender], "already purchased");
+        // Buyer commits to the price they saw: if the owner re-prices between the quote
+        // and settlement, the buy reverts cleanly instead of charging a surprise amount.
+        require(l.price == expectedPrice, "price changed");
         // Exact payment: a buyer can never silently overpay; surplus is rejected, not
-        // pocketed by the seller. (Slippage-safe too: an old-price send reverts cleanly.)
+        // pocketed by the seller.
         require(msg.value == l.price, "wrong price");
 
         purchased[listingId][msg.sender] = true;
@@ -95,6 +98,9 @@ contract KeepMarket is Ownable, ReentrancyGuard {
         require(buyer != address(0), "zero buyer");
         Listing memory l = listings[listingId];
         require(l.exists, "no listing");
+        // Free/paid invariant on-chain (not just in the backend): the relayer may only
+        // grant gas-free access to FREE listings; a priced listing must be paid via buy().
+        require(l.price == 0, "priced listing: buyer must use buy()");
         require(buyer != l.seller, "seller already has access");
 
         purchased[listingId][buyer] = true;
@@ -114,5 +120,11 @@ contract KeepMarket is Ownable, ReentrancyGuard {
         pendingWithdrawals[msg.sender] = 0;
         payable(msg.sender).sendValue(amount);
         emit Withdrawn(msg.sender, amount);
+    }
+
+    /// @notice The relayer (owner) must keep ownership to list and record purchases, so
+    /// renouncing it would permanently brick the market. Disabled (use transferOwnership).
+    function renounceOwnership() public override onlyOwner {
+        revert("ownership required");
     }
 }

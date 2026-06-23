@@ -237,7 +237,9 @@ export async function buyFundedOnChain(listingId, buyerAddress) {
   const l = await c.listings(key);
   if (!l.exists) throw new Error('listing not on-chain');
   const price = l.price; // EXACT value the contract requires (buy() enforces ==)
-  const data = c.interface.encodeFunctionData('buy', [key]);
+  // Pass the price the buyer is committing to; buy() reverts if the listing was re-priced
+  // between this read and settlement (no surprise charge).
+  const data = c.interface.encodeFunctionData('buy', [key, price]);
   const provider = signer().provider;
   const to = _marketDeploy.address;
 

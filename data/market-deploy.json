@@ -1,5 +1,5 @@
 {
-  "address": "0xf8ba100E610e501788C5d0D46853A0D193941FFA",
+  "address": "0xd13f66A2163E674ecA6D6AB3C739B5e576f89272",
   "abi": [
     {
       "inputs": [
@@ -166,6 +166,11 @@
           "internalType": "bytes32",
           "name": "listingId",
           "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "expectedPrice",
+          "type": "uint256"
         }
       ],
       "name": "buy",
@@ -353,5 +358,5 @@
   ],
   "deployer": "0x7353E916DA4EBCe042A7078a97BCAC900E0e8cb4",
   "chainId": 16602,
-  "txHash": "0x6d98c879e26561236ebac9c8a27c1baf683850058e4cc1d87f6d6a03d351f28c"
+  "txHash": "0x665a87ee910f3b6212a20eac841dd84970c3b61feff52edd9c9e7be46fb8ca23"
 }

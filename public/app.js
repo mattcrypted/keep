@@ -917,6 +917,10 @@ async function switchIdentity() {
   restored.hidden = true;
   toldCount = 0;
   popover.hidden = true;
+  // Market state is per-identity: drop the previous user's unlocked content and purchases
+  // so a signed-out or switched session never shows the prior identity's decrypted listings.
+  unlockedCache.clear();
+  purchasedSet = new Set();
   await boot();
 }
 
@@ -1069,8 +1073,14 @@ galleryBack.addEventListener('click', showChatView);
 // already-decrypted plaintext only to the seller or a recorded purchaser.
 let purchasedSet = new Set();
 let marketChain = { address: null, base: 'https://chainscan-galileo.0g.ai' };
+// Decrypted plaintext per listingId, so reopening the market keeps revealed cards revealed
+// instead of forcing the buyer to unlock again. Cleared on identity switch (see switchIdentity).
+const unlockedCache = new Map();
+// Guards overlapping openMarket() runs: a stale run must not render over a newer one.
+let marketEpoch = 0;
 
 async function openMarket() {
+  const epoch = ++marketEpoch;
   popover.hidden = true;
   thread.hidden = true;
   composer.hidden = true;
@@ -1100,6 +1110,7 @@ async function openMarket() {
     const res = await fetch('/api/market/listings');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'could not load the market');
+    if (epoch !== marketEpoch) return; // a newer openMarket() superseded this run
     marketChain = { address: data.market || null, base: data.chainBase || marketChain.base };
     const items = data.listings || [];
     if (!items.length) {
@@ -1155,6 +1166,21 @@ function renderListingCard(it) {
   const btn = el('button', 'listing-btn');
   const note = el('div', 'listing-note');
 
+  // Paint the decrypted content into the card. Shared by a fresh unlock and by a
+  // re-render when the listing is already in unlockedCache.
+  const applyRevealed = (d) => {
+    body.hidden = false;
+    if (d.scope === 'user') {
+      // user-knowledge listing: the seller's own message is the content
+      body.textContent = d.prompt || '(empty)';
+    } else {
+      if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
+      body.textContent = d.response || '(empty)';
+    }
+    body.classList.add('revealed');
+    actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked, decrypted from 0G'));
+  };
+
   const reveal = async () => {
     btn.disabled = true;
     btn.textContent = 'unlocking…';
@@ -1172,16 +1198,8 @@ function renderListingCard(it) {
       }
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'unlock failed');
-      body.hidden = false;
-      if (d.scope === 'user') {
-        // user-knowledge listing: the seller's own message is the content
-        body.textContent = d.prompt || '(empty)';
-      } else {
-        if (d.prompt) body.before(el('div', 'listing-prompt', `“${d.prompt}”`));
-        body.textContent = d.response || '(empty)';
-      }
-      body.classList.add('revealed');
-      actions.replaceChildren(el('div', 'listing-unlocked', '✓ unlocked, decrypted from 0G'));
+      unlockedCache.set(it.listingId, d); // keep it revealed across market re-opens this session
+      applyRevealed(d);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = 'Reveal';
@@ -1260,6 +1278,10 @@ function renderListingCard(it) {
   actions.appendChild(btn);
   if (note.textContent) actions.appendChild(note);
   card.appendChild(actions);
+
+  // Already unlocked this session? Render it revealed straight away so reopening the
+  // market doesn't make the buyer unlock again.
+  if (unlockedCache.has(it.listingId)) applyRevealed(unlockedCache.get(it.listingId));
 
   // Verify the ciphertext is intact on 0G (sealed records verify via contentAddressOk).
   const ver = el('div', 'listing-verify');

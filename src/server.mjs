@@ -42,6 +42,23 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '256kb' }));
 app.use(express.static(PUBLIC_DIR));
 
+// CSRF defense-in-depth: a state-changing request must originate from this app's own
+// origin. Browsers always send Origin (or at least Referer) on cross-origin POSTs, so a
+// forged cross-site request is rejected; non-browser clients that send neither header
+// (curl, server-to-server) are not a CSRF vector and pass. Complements the JSON-only body
+// and the SameSite=Lax session cookie. Also closes the previously forgeable /api/auth/logout.
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origin = req.get('origin') || req.get('referer');
+  if (!origin) return next(); // no browser-supplied origin → not a CSRF attempt
+  let originHost;
+  try { originHost = new URL(origin).host; } catch { return res.status(403).json({ error: 'bad origin' }); }
+  if (originHost !== req.get('host')) {
+    return res.status(403).json({ error: 'cross-origin request blocked' });
+  }
+  next();
+});
+
 // ── In-memory session store (the LIVE working copy). 0G is the durable copy.
 // sessions: Map<sessionId, { turns: Turn[] }>
 // Turn = { turnId, prompt, response, model, ts, hash, receipt }
@@ -141,6 +158,31 @@ const _verifyFails = new Map(); // email -> { count, start }
 const EMAIL_COOLDOWN_MS = 60_000;
 const VERIFY_MAX = 6;
 const VERIFY_WINDOW_MS = 10 * 60_000;
+
+// Periodically drop stale entries from the abuse maps that have no size cap of their own
+// (_ipHits is already capped above), so IP/email rotation can't grow them without bound.
+function sweepAbuseMaps() {
+  const now = Date.now();
+  for (const [ip, d] of _ipDay) if (now - d.start > DAY_MS) _ipDay.delete(ip);
+  for (const [email, ts] of _emailSendAt) if (now - ts > EMAIL_COOLDOWN_MS) _emailSendAt.delete(email);
+  for (const [email, f] of _verifyFails) if (now - f.start > VERIFY_WINDOW_MS) _verifyFails.delete(email);
+}
+setInterval(sweepAbuseMaps, 10 * 60_000).unref();
+
+// Run an async fn over items with a bounded number in flight, so one request can't fan
+// out hundreds of concurrent 0G reads and saturate the upstream node / event loop.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 // Persist to 0G with a couple of retries — cuts the "silently forgot that turn"
 // rate when a single upload hits a transient node/network hiccup.
@@ -432,16 +474,14 @@ app.post('/api/owned', rateLimit, async (req, res) => {
   if (!gateSession(req, res, sessionId)) return;
   const roots = [...new Set(rootHashes.filter((h) => typeof h === 'string' && h.startsWith('0x')))].slice(0, 200);
   const owned = {};
-  await Promise.all(
-    roots.map(async (rh) => {
-      try {
-        const s = await mintStatusOf(rh);
-        if (s.minted) owned[rh] = { tokenId: s.tokenId, owner: s.owner, anchoredAt: s.anchoredAt };
-      } catch {
-        /* skip unreadable root */
-      }
-    })
-  );
+  await mapLimit(roots, 8, async (rh) => {
+    try {
+      const s = await mintStatusOf(rh);
+      if (s.minted) owned[rh] = { tokenId: s.tokenId, owner: s.owner, anchoredAt: s.anchoredAt };
+    } catch {
+      /* skip unreadable root */
+    }
+  });
   res.json({ owned });
 });
 
@@ -460,20 +500,18 @@ app.get('/api/gallery/:sessionId', async (req, res) => {
     const tokens = await galleryOf(owner);
     // Pull each memory's content from 0G in parallel; content is best-effort so a
     // single slow/unavailable record never blanks the whole gallery.
-    const items = await Promise.all(
-      tokens.map(async (t) => {
-        let prompt = null;
-        let response = null;
-        try {
-          const { record } = await getRecord(t.rootHash);
-          prompt = record.prompt;
-          response = record.response;
-        } catch {
-          /* leave content null — card still shows tokenId + on-chain proof */
-        }
-        return { ...t, prompt, response };
-      })
-    );
+    const items = await mapLimit(tokens, 8, async (t) => {
+      let prompt = null;
+      let response = null;
+      try {
+        const { record } = await getRecord(t.rootHash);
+        prompt = record.prompt;
+        response = record.response;
+      } catch {
+        /* leave content null — card still shows tokenId + on-chain proof */
+      }
+      return { ...t, prompt, response };
+    });
     res.json({ owner, items });
   } catch (err) {
     console.error('[gallery] failed:', err.message);
@@ -864,20 +902,27 @@ app.get('/api/health', async (_req, res) => {
 // (e.g. a fire-and-forget 0G write) rejects, rather than letting Node exit.
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  const badBody =
-    err?.type === 'entity.parse.failed' ||
-    err?.type === 'entity.too.large' ||
-    err?.status === 400 ||
-    err?.statusCode === 400;
-  if (!badBody) console.error('[server] unhandled route error:', err?.stack || err?.message || err);
-  res.status(badBody ? 400 : 500).json({ error: badBody ? 'bad request' : 'something went wrong' });
+  // Body-parser errors carry a real 4xx status (400 malformed JSON, 413 body too large).
+  // Preserve it rather than flattening everything to 400; anything else is a 500.
+  const status = Number(err?.status || err?.statusCode) || 0;
+  const clientErr = status >= 400 && status < 500;
+  if (!clientErr) console.error('[server] unhandled route error:', err?.stack || err?.message || err);
+  res.status(clientErr ? status : 500).json({
+    error: clientErr ? (status === 413 ? 'request body too large' : 'bad request') : 'something went wrong',
+  });
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[server] unhandledRejection (kept alive):', reason?.stack || reason?.message || reason);
+  // A stray background promise (e.g. a fire-and-forget 0G write) rejecting is recoverable —
+  // log and keep serving rather than letting Node terminate the process.
+  console.error('[server] unhandledRejection:', reason?.stack || reason?.message || reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[server] uncaughtException (kept alive):', err?.stack || err?.message || err);
+  // A truly uncaught synchronous throw leaves the runtime in an undefined state; exit so the
+  // platform (Railway restartPolicy ON_FAILURE) brings up a clean instance instead of serving
+  // a half-dead one that could persist corrupted state.
+  console.error('[server] uncaughtException, exiting for a clean restart:', err?.stack || err?.message || err);
+  process.exit(1);
 });
 
 const PORT = process.env.PORT || 3000;
