@@ -274,6 +274,13 @@ body {
 }
 .meta-action:active { transform: translateY(0); }
 .meta-action:disabled { opacity: 0.6; cursor: default; transform: none; }
+/* minted "Mint" button — the warm "gold" that marks owned, matching the badge */
+.meta-action.owned {
+  color: var(--own);
+  border-color: var(--own-line);
+  background: rgba(255, 120, 40, 0.12);
+}
+.meta-action.owned:disabled { opacity: 0.85; }
 
 /* Receipt badge under each AI message */
 .badge {

@@ -311,7 +311,7 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified, userHan
         reflectOwned(badge);
         reflectCall(badge);
         renderReceiptActions(meta, badge.dataset.turnId);
-        if (userHandle) attachUserSeal(userHandle, badge.dataset.turnId);
+        if (userHandle) attachUserActions(userHandle, badge.dataset.turnId);
       }
     },
   };
@@ -322,7 +322,7 @@ function addAiMsg(text, { turnId, model, ts, rootHash, status, verified, userHan
 
 // AI-side receipt action: "Share card" sits next to the "on 0G" badge once the
 // memory is stored. (The badge itself opens the details popup and verifies.)
-// "Seal & list" lives under YOUR message instead — see attachUserSeal.
+// "Mint as NFT" and "Seal & list" live under YOUR message instead — see attachUserActions.
 function renderReceiptActions(meta, turnId) {
   if (!turnId || meta.querySelector('.meta-action')) return; // render once
   const share = el('button', 'meta-action', 'Share card ⬦');
@@ -340,16 +340,74 @@ function sealTitleFrom(text) {
   return (text || '').trim().split(/\s+/).slice(0, 8).join(' ').slice(0, 60);
 }
 
-// "Seal & list" on YOUR side of the chat: attached under your message once its
-// turn is stored on 0G, pre-filling a title from what you wrote.
-function attachUserSeal(userHandle, turnId) {
+// Actions on YOUR side of the chat: attached under your message once its turn is
+// stored on 0G. "Mint as NFT" mints the memory you own; "Seal & list" encrypts +
+// lists it for sale. Both target the same stored turn the AI-side badge anchors.
+function attachUserActions(userHandle, turnId) {
   if (!userHandle || !userHandle.meta || !turnId) return;
   lastSealable = { turnId, text: userHandle.text || '' };
   if (userHandle.meta.querySelector('.meta-action')) return; // render once
+
+  const mint = el('button', 'meta-action user-mint', 'Mint as NFT ⬦');
+  mint.dataset.turnId = turnId;
+  mint.title = 'Mint this memory as an NFT you own on 0G';
+  reflectUserMint(mint, turnId); // show "Owned" if it was already minted
+  mint.addEventListener('click', () => mintFromUserButton(mint, turnId));
+  userHandle.meta.appendChild(mint);
+
   const seal = el('button', 'meta-action', 'Seal & list ⬦');
   seal.title = 'Seal this message (encrypt + list on 0G), and mark it as a prediction';
   seal.addEventListener('click', () => openSeal(turnId, { title: sealTitleFrom(userHandle.text), notes: userHandle.text || '' }));
   userHandle.meta.appendChild(seal);
+}
+
+// Mint (or anchor) a turn's memory as an NFT owned by the signed-in identity. Shared
+// by the popover button, the inline "Mint" button, and Share-card anchoring. Caches
+// the mint and reflects ownership on the badge; throws on failure.
+async function mintTurn(turnId) {
+  const res = await fetch('/api/mint', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, turnId, owner: identity.address }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'mint failed');
+  rememberMint(turnId, data.tokenId || (data.alreadyMinted ? 'n/a' : '?'), data.txHash, data.anchoredAt);
+  const badge = thread.querySelector(`.badge[data-turn-id="${CSS.escape(turnId)}"]`);
+  if (badge) reflectOwned(badge);
+  return data;
+}
+
+// Reflect minted/owned state on an inline "Mint" button — from the same-device cache
+// or, after decorateOwnership, chain-sourced ownership.
+function reflectUserMint(btn, turnId) {
+  const m = mintOf(turnId);
+  if (!m) return;
+  btn.textContent = `Owned ⬦ #${m.tokenId}`;
+  btn.classList.add('owned');
+  btn.disabled = true;
+}
+
+// Click handler for the inline "Mint" button under your message.
+async function mintFromUserButton(btn, turnId) {
+  if (!identity) {
+    openLogin('Sign in to mint this memory as an NFT you own.');
+    return;
+  }
+  if (mintOf(turnId)) { reflectUserMint(btn, turnId); return; } // already minted
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'minting on 0G…';
+  try {
+    const data = await mintTurn(turnId);
+    const tokenId = data.tokenId || (data.alreadyMinted ? 'n/a' : '?');
+    btn.textContent = data.alreadyMinted ? 'Owned ⬦' : `Owned ⬦ #${tokenId}`;
+    btn.classList.add('owned');
+  } catch (err) {
+    btn.textContent = prev;
+    btn.disabled = false;
+    alert('Mint failed: ' + err.message);
+  }
 }
 
 // Recognize a typed "seal and list" instruction (an exact-phrase whitelist, so a
@@ -404,6 +462,8 @@ async function decorateOwnership(roots) {
         rememberMint(turnId, info.tokenId, info.txHash, info.anchoredAt);
       }
       reflectOwned(badge);
+      const umint = turnId && thread.querySelector(`.user-mint[data-turn-id="${CSS.escape(turnId)}"]`);
+      if (umint) reflectUserMint(umint, turnId);
     }
   } catch {
     /* ownership is best-effort decoration */
@@ -562,26 +622,14 @@ mintBtn.addEventListener('click', async () => {
   mintResult.textContent = 'minting on 0G…';
   mintResult.className = 'mint-result';
   try {
-    const res = await fetch('/api/mint', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId, turnId, owner: identity.address }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      mintResult.textContent = `✕ ${data.error || 'mint failed'}`;
-      mintResult.className = 'mint-result bad';
-      mintBtn.disabled = false;
-      return;
-    }
+    const data = await mintTurn(turnId); // caches + reflects the badge
     const tokenId = data.tokenId || (data.alreadyMinted ? 'n/a' : '?');
-    rememberMint(turnId, tokenId, data.txHash, data.anchoredAt);
     mintResult.textContent = data.alreadyMinted ? 'already owned ⬦' : `minted ⬦ #${tokenId}, yours on 0G`;
     mintResult.className = 'mint-result ok';
     mintBtn.textContent = 'Owned ⬦';
-    // reflect on the badge
-    const badge = thread.querySelector(`.badge[data-turn-id="${CSS.escape(turnId)}"]`);
-    if (badge) reflectOwned(badge);
+    // keep the inline "Mint" button under your message in sync
+    const umint = thread.querySelector(`.user-mint[data-turn-id="${CSS.escape(turnId)}"]`);
+    if (umint) reflectUserMint(umint, turnId);
   } catch (err) {
     mintResult.textContent = `✕ ${err.message}`;
     mintResult.className = 'mint-result bad';
@@ -602,16 +650,9 @@ async function shareInline(turnId, btn) {
   if (!m || m.anchoredAt == null) {
     if (btn) { btn.disabled = true; btn.textContent = 'anchoring on 0G…'; }
     try {
-      const res = await fetch('/api/mint', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, turnId, owner: identity.address }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'could not anchor on 0G');
-      rememberMint(turnId, data.tokenId || 'n/a', data.txHash, data.anchoredAt);
-      const badge = thread.querySelector(`.badge[data-turn-id="${CSS.escape(turnId)}"]`);
-      if (badge) reflectOwned(badge);
+      await mintTurn(turnId); // caches + reflects the badge
+      const umint = thread.querySelector(`.user-mint[data-turn-id="${CSS.escape(turnId)}"]`);
+      if (umint) reflectUserMint(umint, turnId);
       m = mintOf(turnId);
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Share card ⬦'; }
