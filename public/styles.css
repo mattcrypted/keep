@@ -86,9 +86,11 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 12px; }
 .mark {
-  font-size: 22px;
-  color: var(--accent);
-  text-shadow: 0 0 22px rgba(255, 77, 0, 0.55);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  object-fit: cover;
+  box-shadow: 0 0 22px rgba(255, 77, 0, 0.35);
   animation: floaty 6s ease-in-out infinite;
 }
 .name {
