@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Keep — a self-sovereign AI whose every output is remembered and verifiable on 0G. (0G Cup / The Zero Cup entry)",
   "scripts": {
     "wallet": "node scripts/gen-wallet.mjs",
